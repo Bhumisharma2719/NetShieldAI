@@ -1,0 +1,44 @@
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.api.endpoints import predict
+from app.core.config import settings
+from app.db.postgres import close_postgres_connection, connect_to_postgres
+from app.routers import auth, traffic
+from app.services.seed import seed_default_users
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await connect_to_postgres()
+    if settings.seed_default_users:
+        await seed_default_users()
+    yield
+    await close_postgres_connection()
+
+
+app = FastAPI(title=settings.app_name, lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(auth.router, prefix=settings.api_prefix)
+app.include_router(traffic.router, prefix=settings.api_prefix)
+app.include_router(predict.router, prefix=settings.api_prefix)
+
+
+@app.get("/")
+async def root():
+    return {"message": "NetShield AI backend is running"}
+
+
+@app.get(f"{settings.api_prefix}/health")
+async def health_check():
+    return {"status": "ok"}
