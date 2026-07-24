@@ -21,12 +21,6 @@ Default local connection:
 DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/netshield_ai
 ```
 
-Create the local database with your PostgreSQL tool of choice:
-
-```sql
-CREATE DATABASE netshield_ai;
-```
-
 Default seeded users:
 
 - Admin: `admin` / `admin123`
