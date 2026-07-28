@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.endpoints import predict
+from app.api.endpoints import live_traffic, predict
 from app.core.config import settings
 from app.db.postgres import close_postgres_connection, connect_to_postgres
 from app.routers import auth, traffic
@@ -32,6 +32,7 @@ app.add_middleware(
 app.include_router(auth.router, prefix=settings.api_prefix)
 app.include_router(traffic.router, prefix=settings.api_prefix)
 app.include_router(predict.router, prefix=settings.api_prefix)
+app.include_router(live_traffic.router, prefix=settings.api_prefix)
 
 
 @app.get("/")

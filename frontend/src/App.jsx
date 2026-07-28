@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { GoogleLogin } from "@react-oauth/google";
 import { BarChart3, LogOut, Pause, Play, ShieldCheck, UserCog } from "lucide-react";
 
-import { getMe, getTrafficRecords, getTrafficSummary, loginWithGoogle, loginWithPassword } from "./api";
+import { getLiveTraffic, getMe, getTrafficRecords, getTrafficSummary, loginWithGoogle, loginWithPassword } from "./api";
 
 const STORAGE_KEY = "netshield_auth";
 
@@ -135,9 +135,89 @@ function TrafficTable({ records }) {
   );
 }
 
+function formatLiveTimestamp(timestamp) {
+  if (!timestamp) return "--:--:--";
+
+  try {
+    return new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  } catch {
+    return String(timestamp).slice(11, 19);
+  }
+}
+
+function LiveTrafficPanel({ records, error }) {
+  const highRiskCount = records.filter((record) => record.risk_label === "HIGH-RISK").length;
+  const anomalyCount = records.filter((record) => record.prediction === 1).length;
+  const averageRisk = records.length
+    ? records.reduce((sum, record) => sum + Number(record.risk_score || 0), 0) / records.length
+    : 0;
+
+  return (
+    <section className="live-traffic-panel">
+      <div className="panel-heading">
+        <span>Live Socket Feed</span>
+        <strong>{error || `${records.length} latest packets`}</strong>
+      </div>
+      <div className="live-feed-grid">
+        <div className="risk-meter-card">
+          <span>Average Risk</span>
+          <strong>{averageRisk.toFixed(1)}%</strong>
+          <div className="risk-meter">
+            <i style={{ width: `${Math.min(averageRisk, 100)}%` }} />
+          </div>
+          <div className="live-mini-stats">
+            <em>{highRiskCount} high risk</em>
+            <em>{anomalyCount} anomalies</em>
+          </div>
+        </div>
+        <div className="live-feed-table-wrap">
+          <table className="live-feed-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Source</th>
+                <th>Destination</th>
+                <th>Proto</th>
+                <th>Packets</th>
+                <th>Bytes</th>
+                <th>Risk</th>
+              </tr>
+            </thead>
+            <tbody>
+              {records.length ? (
+                records.map((record) => (
+                  <tr key={record.id || `${record.timestamp}-${record.src_ip}-${record.dst_ip}`}>
+                    <td>{formatLiveTimestamp(record.timestamp)}</td>
+                    <td>{record.src_ip}</td>
+                    <td>{record.dst_ip}</td>
+                    <td>{record.proto}</td>
+                    <td>{record.packets}</td>
+                    <td>{Number(record.bytes || 0).toLocaleString()}</td>
+                    <td>
+                      <span className={`risk-pill ${String(record.risk_label || "LOW-RISK").toLowerCase()}`}>
+                        {Number(record.risk_score || 0).toFixed(1)}%
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan="7">Start live_sniffer.py to stream socket detections here.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function AnalystTrafficDashboard() {
   const [summary, setSummary] = useState(null);
   const [records, setRecords] = useState([]);
+  const [livePackets, setLivePackets] = useState([]);
+  const [liveTrafficError, setLiveTrafficError] = useState("");
   const [error, setError] = useState("");
   const [live, setLive] = useState(true);
 
@@ -174,6 +254,36 @@ function AnalystTrafficDashboard() {
     };
   }, [live]);
 
+  useEffect(() => {
+    let active = true;
+
+    async function loadLiveTraffic() {
+      try {
+        const data = await getLiveTraffic(20);
+        if (!active) return;
+        setLivePackets(data.records || []);
+        setLiveTrafficError(data.error || "");
+      } catch (err) {
+        if (active) {
+          setLiveTrafficError(err.message);
+        }
+      }
+    }
+
+    loadLiveTraffic();
+    if (!live) {
+      return () => {
+        active = false;
+      };
+    }
+
+    const timer = window.setInterval(loadLiveTraffic, 1500);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [live]);
+
   if (error) {
     return <p className="dashboard-error">{error}</p>;
   }
@@ -203,6 +313,7 @@ function AnalystTrafficDashboard() {
         <Stat label="Observed packets" value={summary.totals.packets.toLocaleString()} />
         <Stat label="Attack flows" value={summary.totals.attacks.toLocaleString()} />
       </section>
+      <LiveTrafficPanel records={livePackets} error={liveTrafficError} />
       <section className="charts-grid">
         <LineChart points={liveTrend} />
         <DonutChart title="Attack Mix" items={liveAttackDistribution} />

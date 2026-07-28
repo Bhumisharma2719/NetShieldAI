@@ -8,4 +8,7 @@ frontend/dist/
 *.db
 *.sqlite
 *.sqlite3
+backend/ml_core/.scapy_config/
+backend/ml_core/live_traffic.json
+backend/ml_core/live_traffic.tmp
 *.log

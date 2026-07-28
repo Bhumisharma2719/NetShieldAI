@@ -307,12 +307,128 @@ input:focus {
 }
 
 .chart-panel,
+.live-traffic-panel,
 .traffic-table-panel {
   background: white;
   border: 1px solid #dbe5ec;
   border-radius: 8px;
   min-width: 0;
   padding: 14px;
+}
+
+.live-traffic-panel {
+  margin: 0 clamp(18px, 4vw, 48px) 12px;
+}
+
+.live-feed-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 260px minmax(0, 1fr);
+}
+
+.risk-meter-card {
+  background: #f6fafb;
+  border: 1px solid #dbe5ec;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.risk-meter-card span {
+  color: #6a7e8e;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.risk-meter-card strong {
+  color: #123a5b;
+  font-size: 1.6rem;
+}
+
+.risk-meter {
+  background: #dbe5ec;
+  border-radius: 999px;
+  height: 10px;
+  overflow: hidden;
+}
+
+.risk-meter i {
+  background: linear-gradient(90deg, #118a88, #e0a323, #d04f3f);
+  display: block;
+  height: 100%;
+}
+
+.live-mini-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.live-mini-stats em {
+  background: white;
+  border: 1px solid #dbe5ec;
+  border-radius: 999px;
+  color: #405567;
+  font-size: 0.78rem;
+  font-style: normal;
+  font-weight: 800;
+  padding: 5px 9px;
+}
+
+.live-feed-table-wrap {
+  max-height: 190px;
+  overflow: auto;
+}
+
+.live-feed-table {
+  border-collapse: collapse;
+  min-width: 780px;
+  width: 100%;
+}
+
+.live-feed-table th,
+.live-feed-table td {
+  border-bottom: 1px solid #e3ebf0;
+  color: #263c50;
+  font-size: 0.82rem;
+  padding: 8px 9px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.live-feed-table th {
+  background: white;
+  color: #6a7e8e;
+  font-size: 0.74rem;
+  position: sticky;
+  text-transform: uppercase;
+  top: 0;
+  z-index: 1;
+}
+
+.risk-pill {
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 0.76rem;
+  font-weight: 900;
+  padding: 4px 8px;
+}
+
+.risk-pill.low-risk {
+  background: #e8f4ef;
+  color: #176348;
+}
+
+.risk-pill.medium-risk {
+  background: #fff4d8;
+  color: #8a5d10;
+}
+
+.risk-pill.high-risk {
+  background: #ffe8e5;
+  color: #9b2418;
 }
 
 .chart-panel.wide {
@@ -553,6 +669,10 @@ input:focus {
   }
 
   .charts-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .live-feed-grid {
     grid-template-columns: 1fr;
   }
 
