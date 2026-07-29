@@ -45,14 +45,6 @@ export function getMe(token) {
   });
 }
 
-export function getTrafficSummary() {
-  return request("/traffic/summary");
-}
-
-export function getTrafficRecords(offset = 0, limit = 25) {
-  return request(`/traffic/records?offset=${offset}&limit=${limit}`);
-}
-
 export function getLiveTraffic(limit = 20) {
   return request(`/live-traffic?limit=${limit}`);
 }

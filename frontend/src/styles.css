@@ -303,12 +303,10 @@ input:focus {
   display: grid;
   gap: 12px;
   grid-template-columns: 1.35fr 0.8fr 0.8fr;
-  padding: 0 clamp(18px, 4vw, 48px) 12px;
+  padding: 0 clamp(18px, 4vw, 48px) 32px;
 }
 
-.chart-panel,
-.live-traffic-panel,
-.traffic-table-panel {
+.chart-panel {
   background: white;
   border: 1px solid #dbe5ec;
   border-radius: 8px;
@@ -316,7 +314,16 @@ input:focus {
   padding: 14px;
 }
 
+.chart-panel.wide {
+  min-height: 226px;
+}
+
 .live-traffic-panel {
+  background: white;
+  border: 1px solid #dbe5ec;
+  border-radius: 8px;
+  min-width: 0;
+  padding: 14px;
   margin: 0 clamp(18px, 4vw, 48px) 12px;
 }
 
@@ -431,10 +438,6 @@ input:focus {
   color: #9b2418;
 }
 
-.chart-panel.wide {
-  min-height: 226px;
-}
-
 .panel-heading {
   align-items: baseline;
   display: flex;
@@ -505,11 +508,6 @@ input:focus {
   stroke-width: 7;
 }
 
-.donut-chart circle[data-slice],
-.legend-row span {
-  color: #118a88;
-}
-
 .donut-chart circle[data-slice="0"] {
   stroke: #118a88;
 }
@@ -548,6 +546,7 @@ input:focus {
 .legend-row span {
   background: currentColor;
   border-radius: 999px;
+  color: #118a88;
   height: 10px;
   width: 10px;
 }
@@ -578,59 +577,6 @@ input:focus {
   color: #6a7e8e;
   font-style: normal;
   font-weight: 800;
-}
-
-.traffic-table-panel {
-  margin: 0 clamp(18px, 4vw, 48px) 32px;
-}
-
-.traffic-table-wrap {
-  max-height: 420px;
-  overflow: auto;
-}
-
-.traffic-table {
-  border-collapse: collapse;
-  min-width: 860px;
-  width: 100%;
-}
-
-.traffic-table th,
-.traffic-table td {
-  border-bottom: 1px solid #e3ebf0;
-  padding: 12px 10px;
-  text-align: left;
-  white-space: nowrap;
-}
-
-.traffic-table th {
-  background: white;
-  color: #6a7e8e;
-  font-size: 0.78rem;
-  position: sticky;
-  text-transform: uppercase;
-  top: 0;
-  z-index: 1;
-}
-
-.traffic-table td {
-  color: #263c50;
-  font-size: 0.9rem;
-}
-
-.attack-pill {
-  background: #e8f4ef;
-  border-radius: 999px;
-  color: #176348;
-  display: inline-flex;
-  font-size: 0.78rem;
-  font-weight: 800;
-  padding: 5px 9px;
-}
-
-.attack-pill.danger {
-  background: #ffe8e5;
-  color: #9b2418;
 }
 
 .dashboard-error,

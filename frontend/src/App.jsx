@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { GoogleLogin } from "@react-oauth/google";
 import { BarChart3, LogOut, Pause, Play, ShieldCheck, UserCog } from "lucide-react";
 
-import { getLiveTraffic, getMe, getTrafficRecords, getTrafficSummary, loginWithGoogle, loginWithPassword } from "./api";
+import { getLiveTraffic, getMe, loginWithGoogle, loginWithPassword } from "./api";
 
 const STORAGE_KEY = "netshield_auth";
 
@@ -23,15 +23,26 @@ function Stat({ label, value }) {
   );
 }
 
-function LineChart({ points }) {
+function formatLiveTimestamp(timestamp) {
+  if (!timestamp) return "--:--:--";
+
+  try {
+    return new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  } catch {
+    return String(timestamp).slice(11, 19);
+  }
+}
+
+function LiveLineChart({ points }) {
   const width = 720;
   const height = 178;
   const padding = 20;
-  const maxPackets = Math.max(...points.map((point) => point.packets), 1);
-  const step = points.length > 1 ? (width - padding * 2) / (points.length - 1) : 0;
-  const path = points
+  const safePoints = points.length ? points : [{ time: "now", packets: 0 }];
+  const maxPackets = Math.max(...safePoints.map((point) => point.packets), 1);
+  const step = safePoints.length > 1 ? (width - padding * 2) / (safePoints.length - 1) : 0;
+  const path = safePoints
     .map((point, index) => {
-      const x = padding + index * step;
+      const x = safePoints.length > 1 ? padding + index * step : width / 2;
       const y = height - padding - (point.packets / maxPackets) * (height - padding * 2);
       return `${index === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)}`;
     })
@@ -41,108 +52,56 @@ function LineChart({ points }) {
     <div className="chart-panel wide">
       <div className="panel-heading">
         <span>Traffic Trend</span>
-        <strong>Packets over time</strong>
+        <strong>{points.length ? "Live packets over time" : "Waiting for live packets"}</strong>
       </div>
-      <svg className="line-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Traffic trend line chart">
+      <svg className="line-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Live traffic trend chart">
         <path className="grid-line" d={`M ${padding} ${height - padding} L ${width - padding} ${height - padding}`} />
         <path className="trend-area" d={`${path} L ${width - padding} ${height - padding} L ${padding} ${height - padding} Z`} />
         <path className="trend-line" d={path} />
-        {points.map((point, index) => {
-          const x = padding + index * step;
+        {safePoints.map((point, index) => {
+          const x = safePoints.length > 1 ? padding + index * step : width / 2;
           const y = height - padding - (point.packets / maxPackets) * (height - padding * 2);
-          return <circle key={point.time} cx={x} cy={y} r="3" />;
+          return <circle key={`${point.time}-${index}`} cx={x} cy={y} r="3" />;
         })}
       </svg>
     </div>
   );
 }
 
-function DonutChart({ title, items }) {
-  const total = items.reduce((sum, item) => sum + item.value, 0) || 1;
+function LiveDonutChart({ title, items }) {
+  const safeItems = items.length ? items : [{ name: "No live data", value: 1 }];
+  const total = safeItems.reduce((sum, item) => sum + item.value, 0) || 1;
   let cumulative = 0;
 
   return (
     <div className="chart-panel">
       <div className="panel-heading">
         <span>{title}</span>
-        <strong>{total.toLocaleString()} flows</strong>
+        <strong>{items.length ? `${total.toLocaleString()} packets` : "Waiting"}</strong>
       </div>
       <div className="donut-wrap">
-        <svg viewBox="0 0 42 42" className="donut-chart" role="img" aria-label={`${title} pie chart`}>
+        <svg viewBox="0 0 42 42" className="donut-chart" role="img" aria-label={`${title} live donut chart`}>
           <circle cx="21" cy="21" r="15.915" />
-          {items.slice(0, 5).map((item, index) => {
+          {safeItems.slice(0, 5).map((item, index) => {
             const percent = (item.value / total) * 100;
             const dash = `${percent} ${100 - percent}`;
             const offset = 25 - cumulative;
             cumulative += percent;
-            return <circle key={item.name} cx="21" cy="21" r="15.915" strokeDasharray={dash} strokeDashoffset={offset} data-slice={index} />;
+            return <circle key={`${item.name}-${index}`} cx="21" cy="21" r="15.915" strokeDasharray={dash} strokeDashoffset={offset} data-slice={index} />;
           })}
         </svg>
         <div className="legend-list">
-          {items.slice(0, 5).map((item, index) => (
-            <div key={item.name} className="legend-row">
+          {safeItems.slice(0, 5).map((item, index) => (
+            <div key={`${item.name}-${index}`} className="legend-row">
               <span data-slice={index} />
               <strong>{item.name}</strong>
-              <em>{item.value}</em>
+              <em>{items.length ? item.value : 0}</em>
             </div>
           ))}
         </div>
       </div>
     </div>
   );
-}
-
-function TrafficTable({ records }) {
-  return (
-    <section className="traffic-table-panel">
-      <div className="panel-heading">
-        <span>Live Packet Stream</span>
-        <strong>{records.length} latest flows</strong>
-      </div>
-      <div className="traffic-table-wrap">
-        <table className="traffic-table">
-          <thead>
-            <tr>
-              <th>Time</th>
-              <th>Source</th>
-              <th>Destination</th>
-              <th>Proto</th>
-              <th>Service</th>
-              <th>Packets</th>
-              <th>Bytes</th>
-              <th>Attack</th>
-            </tr>
-          </thead>
-          <tbody>
-            {records.map((record) => (
-              <tr key={`${record.id}-${record.timestamp}`}>
-                <td>{record.timestamp.slice(11, 19)}</td>
-                <td>{record.src_ip}</td>
-                <td>{record.dst_ip}</td>
-                <td>{record.proto}</td>
-                <td>{record.service}</td>
-                <td>{record.packets}</td>
-                <td>{record.bytes.toLocaleString()}</td>
-                <td>
-                  <span className={record.label ? "attack-pill danger" : "attack-pill"}>{record.attack_cat}</span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
-function formatLiveTimestamp(timestamp) {
-  if (!timestamp) return "--:--:--";
-
-  try {
-    return new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-  } catch {
-    return String(timestamp).slice(11, 19);
-  }
 }
 
 function LiveTrafficPanel({ records, error }) {
@@ -213,53 +172,55 @@ function LiveTrafficPanel({ records, error }) {
   );
 }
 
+function buildLiveTrafficTrend(records) {
+  const buckets = records
+    .slice()
+    .reverse()
+    .reduce((acc, record) => {
+      const time = formatLiveTimestamp(record.timestamp);
+      if (!acc[time]) {
+        acc[time] = { time, packets: 0 };
+      }
+      acc[time].packets += Number(record.packets || 1);
+      return acc;
+    }, {});
+
+  return Object.values(buckets).slice(-24);
+}
+
+function buildLiveRiskMix(records) {
+  const counts = records.reduce((acc, record) => {
+    const key = record.prediction === 1 || record.risk_label === "HIGH-RISK" ? "High Risk / Anomaly" : "Normal";
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+
+  return Object.entries(counts).map(([name, value]) => ({ name, value }));
+}
+
+function buildLiveProtocolMix(records) {
+  const counts = records.reduce((acc, record) => {
+    const key = String(record.proto || "unknown").toUpperCase();
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+
+  return Object.entries(counts)
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value);
+}
+
 function AnalystTrafficDashboard() {
-  const [summary, setSummary] = useState(null);
-  const [records, setRecords] = useState([]);
   const [livePackets, setLivePackets] = useState([]);
   const [liveTrafficError, setLiveTrafficError] = useState("");
-  const [error, setError] = useState("");
   const [live, setLive] = useState(true);
-
-  useEffect(() => {
-    getTrafficSummary().then(setSummary).catch((err) => setError(err.message));
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-    let currentOffset = 0;
-
-    async function loadNextBatch() {
-      try {
-        const data = await getTrafficRecords(currentOffset, 12);
-        if (!active) return;
-        setRecords((current) => [...data.records, ...current].slice(0, 36));
-        currentOffset = data.next_offset;
-      } catch (err) {
-        setError(err.message);
-      }
-    }
-
-    loadNextBatch();
-    if (!live) {
-      return () => {
-        active = false;
-      };
-    }
-
-    const timer = window.setInterval(loadNextBatch, 2200);
-    return () => {
-      active = false;
-      window.clearInterval(timer);
-    };
-  }, [live]);
 
   useEffect(() => {
     let active = true;
 
     async function loadLiveTraffic() {
       try {
-        const data = await getLiveTraffic(20);
+        const data = await getLiveTraffic(100);
         if (!active) return;
         setLivePackets(data.records || []);
         setLiveTrafficError(data.error || "");
@@ -284,17 +245,15 @@ function AnalystTrafficDashboard() {
     };
   }, [live]);
 
-  if (error) {
-    return <p className="dashboard-error">{error}</p>;
-  }
-
-  if (!summary) {
-    return <p className="dashboard-loading">Loading traffic telemetry...</p>;
-  }
-
-  const liveTrend = buildLiveTrend(records, summary.traffic_trend);
-  const liveAttackDistribution = buildDistribution(records, "attack_cat", summary.attack_distribution);
-  const liveProtocolDistribution = buildDistribution(records, "proto", summary.protocol_distribution);
+  const latestPackets = livePackets.slice(0, 20);
+  const observedPackets = livePackets.length;
+  const attackFlows = livePackets.filter((record) => record.prediction === 1).length;
+  const highRiskCount = livePackets.filter((record) => record.risk_label === "HIGH-RISK").length;
+  const mediumRiskCount = livePackets.filter((record) => record.risk_label === "MEDIUM-RISK").length;
+  const lowRiskCount = livePackets.filter((record) => record.risk_label === "LOW-RISK").length;
+  const trafficTrend = buildLiveTrafficTrend(livePackets);
+  const riskMix = buildLiveRiskMix(livePackets);
+  const protocolMix = buildLiveProtocolMix(livePackets);
 
   return (
     <>
@@ -309,53 +268,18 @@ function AnalystTrafficDashboard() {
         </button>
       </section>
       <section className="stats-grid">
-        <Stat label="Dataset flows" value={summary.totals.flows.toLocaleString()} />
-        <Stat label="Observed packets" value={summary.totals.packets.toLocaleString()} />
-        <Stat label="Attack flows" value={summary.totals.attacks.toLocaleString()} />
+        <Stat label="Observed packets" value={observedPackets.toLocaleString()} />
+        <Stat label="Attack flows" value={attackFlows.toLocaleString()} />
+        <Stat label="Risk levels" value={`H ${highRiskCount} / M ${mediumRiskCount} / L ${lowRiskCount}`} />
       </section>
-      <LiveTrafficPanel records={livePackets} error={liveTrafficError} />
+      <LiveTrafficPanel records={latestPackets} error={liveTrafficError} />
       <section className="charts-grid">
-        <LineChart points={liveTrend} />
-        <DonutChart title="Attack Mix" items={liveAttackDistribution} />
-        <DonutChart title="Protocol Mix" items={liveProtocolDistribution} />
+        <LiveLineChart points={trafficTrend} />
+        <LiveDonutChart title="Attack / Anomaly Mix" items={riskMix} />
+        <LiveDonutChart title="Protocol Mix" items={protocolMix} />
       </section>
-      <TrafficTable records={records} />
     </>
   );
-}
-
-function buildDistribution(records, field, fallback) {
-  if (!records.length) return fallback;
-
-  const counts = records.reduce((acc, record) => {
-    const key = record[field] || "unknown";
-    acc[key] = (acc[key] || 0) + 1;
-    return acc;
-  }, {});
-
-  return Object.entries(counts)
-    .map(([name, value]) => ({ name, value }))
-    .sort((a, b) => b.value - a.value);
-}
-
-function buildLiveTrend(records, fallback) {
-  if (!records.length) return fallback;
-
-  const buckets = records
-    .slice()
-    .reverse()
-    .reduce((acc, record) => {
-      const time = record.timestamp?.slice(11, 16) || "now";
-      if (!acc[time]) {
-        acc[time] = { time, packets: 0, flows: 0, attacks: 0 };
-      }
-      acc[time].packets += record.packets;
-      acc[time].flows += 1;
-      acc[time].attacks += record.label;
-      return acc;
-    }, {});
-
-  return Object.values(buckets).slice(-24);
 }
 
 function Dashboard({ session, onLogout }) {
