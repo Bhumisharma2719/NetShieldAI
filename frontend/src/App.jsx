@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { GoogleLogin } from "@react-oauth/google";
-import { BarChart3, LogOut, Pause, Play, ShieldCheck, UserCog } from "lucide-react";
+import { BarChart3, LogOut, Pause, Play, ShieldCheck, UserCog, Volume2, VolumeX } from "lucide-react";
 
 import { getLiveTraffic, getMe, loginWithGoogle, loginWithPassword } from "./api";
 
@@ -172,6 +172,54 @@ function LiveTrafficPanel({ records, error }) {
   );
 }
 
+function ThreatAlerts({ alerts, audioMuted, onDismiss, onClear, onToggleAudio }) {
+  const latestAlert = alerts[0];
+
+  return (
+    <section className={`alert-console ${latestAlert ? "active" : ""}`}>
+      <div className="alert-console-head">
+        <div>
+          <span>Active Alerts</span>
+          <strong>{alerts.length}</strong>
+        </div>
+        <div className="alert-actions">
+          <button
+            className="sound-toggle-button"
+            onClick={onToggleAudio}
+            aria-label={audioMuted ? "Unmute alert sound" : "Mute alert sound"}
+            title={audioMuted ? "Unmute alert sound" : "Mute alert sound"}
+          >
+            {audioMuted ? <VolumeX size={17} /> : <Volume2 size={17} />}
+          </button>
+          {alerts.length ? (
+            <button className="clear-alerts-button" onClick={onClear}>
+              Clear All Alerts
+            </button>
+          ) : null}
+        </div>
+      </div>
+      {latestAlert ? (
+        <div className="threat-alert-banner" role="alert">
+          <div className="threat-alert-copy">
+            <span>⚠️ HIGH RISK ANOMALY DETECTED</span>
+            <strong>
+              Src: {latestAlert.src_ip} -&gt; Dst: {latestAlert.dst_ip} | Protocol: {String(latestAlert.proto || "unknown").toUpperCase()} | Risk:{" "}
+              {Number(latestAlert.risk_score || 0).toFixed(1)}%
+            </strong>
+          </div>
+          <button className="dismiss-alert-button" onClick={() => onDismiss(latestAlert.id)}>
+            Dismiss Alert
+          </button>
+        </div>
+      ) : (
+        <div className="quiet-alert-banner">
+          <span>No active high-risk anomalies</span>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function buildLiveTrafficTrend(records) {
   const buckets = records
     .slice()
@@ -213,7 +261,50 @@ function buildLiveProtocolMix(records) {
 function AnalystTrafficDashboard() {
   const [livePackets, setLivePackets] = useState([]);
   const [liveTrafficError, setLiveTrafficError] = useState("");
+  const [alerts, setAlerts] = useState([]);
+  const [seenAlertIds, setSeenAlertIds] = useState(() => new Set());
+  const [audioMuted, setAudioMuted] = useState(false);
+  const audioContextRef = useRef(null);
   const [live, setLive] = useState(true);
+
+  function playAlertBeep() {
+    if (audioMuted) return;
+
+    try {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextClass) return;
+
+      const audioContext = audioContextRef.current || new AudioContextClass();
+      audioContextRef.current = audioContext;
+
+      const playTone = () => {
+        const now = audioContext.currentTime;
+        const gain = audioContext.createGain();
+        gain.gain.setValueAtTime(0.0001, now);
+        gain.gain.exponentialRampToValueAtTime(0.12, now + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.32);
+        gain.connect(audioContext.destination);
+
+        [0, 0.15].forEach((offset) => {
+          const oscillator = audioContext.createOscillator();
+          oscillator.type = "sawtooth";
+          oscillator.frequency.setValueAtTime(880, now + offset);
+          oscillator.frequency.exponentialRampToValueAtTime(620, now + offset + 0.12);
+          oscillator.connect(gain);
+          oscillator.start(now + offset);
+          oscillator.stop(now + offset + 0.12);
+        });
+      };
+
+      if (audioContext.state === "suspended") {
+        audioContext.resume().then(playTone).catch(() => {});
+      } else {
+        playTone();
+      }
+    } catch {
+      // Some browsers block audio before user interaction; alert UI still works.
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -222,8 +313,35 @@ function AnalystTrafficDashboard() {
       try {
         const data = await getLiveTraffic(100);
         if (!active) return;
-        setLivePackets(data.records || []);
+        const nextRecords = data.records || [];
+        setLivePackets(nextRecords);
         setLiveTrafficError(data.error || "");
+        setSeenAlertIds((currentSeenIds) => {
+          const nextSeenIds = new Set(currentSeenIds);
+          const newAlerts = nextRecords
+            .filter((record) => Number(record.risk_score || 0) >= 70)
+            .filter((record) => {
+              const alertId = record.id || `${record.timestamp}-${record.src_ip}-${record.dst_ip}-${record.risk_score}`;
+              if (nextSeenIds.has(alertId)) {
+                return false;
+              }
+
+              nextSeenIds.add(alertId);
+              return true;
+            })
+            .map((record) => ({
+              ...record,
+              id: record.id || `${record.timestamp}-${record.src_ip}-${record.dst_ip}-${record.risk_score}`,
+              createdAt: Date.now(),
+            }));
+
+          if (newAlerts.length) {
+            setAlerts((currentAlerts) => [...newAlerts, ...currentAlerts].slice(0, 12));
+            playAlertBeep();
+          }
+
+          return nextSeenIds;
+        });
       } catch (err) {
         if (active) {
           setLiveTrafficError(err.message);
@@ -243,7 +361,18 @@ function AnalystTrafficDashboard() {
       active = false;
       window.clearInterval(timer);
     };
-  }, [live]);
+  }, [audioMuted, live]);
+
+  useEffect(() => {
+    if (!alerts.length) return undefined;
+
+    const timer = window.setInterval(() => {
+      const expiryTime = Date.now() - 30000;
+      setAlerts((currentAlerts) => currentAlerts.filter((alert) => !alert.createdAt || alert.createdAt > expiryTime));
+    }, 5000);
+
+    return () => window.clearInterval(timer);
+  }, [alerts.length]);
 
   const latestPackets = livePackets.slice(0, 20);
   const observedPackets = livePackets.length;
@@ -267,6 +396,13 @@ function AnalystTrafficDashboard() {
           {live ? "Pause Live Stream" : "Resume Live Stream"}
         </button>
       </section>
+      <ThreatAlerts
+        alerts={alerts}
+        audioMuted={audioMuted}
+        onDismiss={(alertId) => setAlerts((currentAlerts) => currentAlerts.filter((alert) => alert.id !== alertId))}
+        onClear={() => setAlerts([])}
+        onToggleAudio={() => setAudioMuted((current) => !current)}
+      />
       <section className="stats-grid">
         <Stat label="Observed packets" value={observedPackets.toLocaleString()} />
         <Stat label="Attack flows" value={attackFlows.toLocaleString()} />
