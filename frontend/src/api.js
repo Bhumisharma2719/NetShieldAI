@@ -48,3 +48,27 @@ export function getMe(token) {
 export function getLiveTraffic(limit = 20) {
   return request(`/live-traffic?limit=${limit}`);
 }
+
+export async function downloadAuditReport() {
+  let response;
+
+  try {
+    response = await fetch(`${API_URL}/live-traffic/export`);
+  } catch {
+    throw new Error("Backend is not reachable. Check that FastAPI is running on port 8000.");
+  }
+
+  if (!response.ok) {
+    throw new Error("Audit report export failed");
+  }
+
+  const blob = await response.blob();
+  const downloadUrl = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = downloadUrl;
+  link.download = "NetShield_Security_Audit_Report.csv";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(downloadUrl);
+}

@@ -1,6 +1,10 @@
-from fastapi import APIRouter, Query
+import csv
+from io import StringIO
 
-from app.services.live_traffic_store import get_latest_live_logs
+from fastapi import APIRouter, Query
+from fastapi.responses import Response
+
+from app.services.live_traffic_store import get_all_live_logs, get_latest_live_logs
 
 router = APIRouter(tags=["live-traffic"])
 
@@ -25,3 +29,49 @@ async def live_traffic(limit: int = Query(default=20, ge=1, le=100)):
         "high_risk_count": high_risk_count,
         "anomaly_count": anomaly_count,
     }
+
+
+@router.get("/live-traffic/export")
+async def export_live_traffic_report():
+    try:
+        records = get_all_live_logs()
+        output = StringIO()
+        writer = csv.DictWriter(
+            output,
+            fieldnames=[
+                "Timestamp",
+                "Source IP",
+                "Destination IP",
+                "Protocol",
+                "Packets",
+                "Bytes",
+                "Risk Score (%)",
+                "Risk Category",
+            ],
+        )
+        writer.writeheader()
+
+        for record in records:
+            writer.writerow(
+                {
+                    "Timestamp": record.get("timestamp", ""),
+                    "Source IP": record.get("src_ip", ""),
+                    "Destination IP": record.get("dst_ip", ""),
+                    "Protocol": str(record.get("proto", "")).upper(),
+                    "Packets": record.get("packets", 0),
+                    "Bytes": record.get("bytes", 0),
+                    "Risk Score (%)": record.get("risk_score", 0),
+                    "Risk Category": record.get("risk_label") or record.get("label", ""),
+                }
+            )
+    except Exception as exc:
+        output = StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["Timestamp", "Source IP", "Destination IP", "Protocol", "Packets", "Bytes", "Risk Score (%)", "Risk Category"])
+        writer.writerow(["EXPORT_ERROR", "", "", "", "", "", "", f"Unable to export live traffic: {exc}"])
+
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="NetShield_Security_Audit_Report.csv"'},
+    )

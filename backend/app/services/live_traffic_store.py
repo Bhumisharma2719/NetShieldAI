@@ -48,3 +48,7 @@ def get_latest_live_logs(limit: int = 20) -> list[dict[str, Any]]:
     limit = max(1, min(limit, MAX_LIVE_RECORDS))
     records = _read_records_unlocked()
     return list(reversed(records[-limit:]))
+
+
+def get_all_live_logs() -> list[dict[str, Any]]:
+    return _read_records_unlocked()

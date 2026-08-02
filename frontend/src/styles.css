@@ -284,12 +284,17 @@ input:focus {
   color: #172033;
 }
 
-.stream-toggle {
+.stream-actions {
   align-items: center;
-  background: #123a5b;
+  display: inline-flex;
+  gap: 10px;
+}
+
+.stream-toggle,
+.export-report-button {
+  align-items: center;
   border: 0;
   border-radius: 8px;
-  color: white;
   cursor: pointer;
   display: inline-flex;
   font-size: 0.9rem;
@@ -297,6 +302,35 @@ input:focus {
   gap: 8px;
   min-height: 36px;
   padding: 0 13px;
+  transition: background-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.stream-toggle {
+  background: #123a5b;
+  color: white;
+}
+
+.export-report-button {
+  background: white;
+  border: 1px solid #c6d4df;
+  color: #123a5b;
+}
+
+.stream-toggle:hover,
+.export-report-button:hover {
+  box-shadow: 0 8px 20px rgba(18, 58, 91, 0.12);
+  transform: translateY(-1px);
+}
+
+.export-report-button:hover {
+  background: #f6fafb;
+  border-color: #118a88;
+}
+
+.export-report-button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+  transform: none;
 }
 
 .alert-console {
@@ -755,6 +789,16 @@ input:focus {
   .stream-toolbar {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .stream-actions {
+    align-items: stretch;
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .stream-actions button {
+    justify-content: center;
   }
 
   .alert-console-head,

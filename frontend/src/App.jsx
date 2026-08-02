@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { GoogleLogin } from "@react-oauth/google";
-import { BarChart3, LogOut, Pause, Play, ShieldCheck, UserCog, Volume2, VolumeX } from "lucide-react";
+import { BarChart3, Download, LogOut, Pause, Play, ShieldCheck, UserCog, Volume2, VolumeX } from "lucide-react";
 
-import { getLiveTraffic, getMe, loginWithGoogle, loginWithPassword } from "./api";
+import { downloadAuditReport, getLiveTraffic, getMe, loginWithGoogle, loginWithPassword } from "./api";
 
 const STORAGE_KEY = "netshield_auth";
 
@@ -264,6 +264,7 @@ function AnalystTrafficDashboard() {
   const [alerts, setAlerts] = useState([]);
   const [seenAlertIds, setSeenAlertIds] = useState(() => new Set());
   const [audioMuted, setAudioMuted] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const audioContextRef = useRef(null);
   const [live, setLive] = useState(true);
 
@@ -384,6 +385,19 @@ function AnalystTrafficDashboard() {
   const riskMix = buildLiveRiskMix(livePackets);
   const protocolMix = buildLiveProtocolMix(livePackets);
 
+  async function handleExportAuditReport() {
+    setExporting(true);
+    setLiveTrafficError("");
+
+    try {
+      await downloadAuditReport();
+    } catch (err) {
+      setLiveTrafficError(err.message);
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return (
     <>
       <section className="stream-toolbar">
@@ -391,10 +405,16 @@ function AnalystTrafficDashboard() {
           <span>Live Analysis</span>
           <strong>{live ? "Streaming traffic windows" : "Stream paused"}</strong>
         </div>
-        <button className="stream-toggle" onClick={() => setLive((current) => !current)}>
-          {live ? <Pause size={18} /> : <Play size={18} />}
-          {live ? "Pause Live Stream" : "Resume Live Stream"}
-        </button>
+        <div className="stream-actions">
+          <button className="export-report-button" onClick={handleExportAuditReport} disabled={exporting}>
+            <Download size={17} />
+            {exporting ? "Exporting..." : "Export Audit Report"}
+          </button>
+          <button className="stream-toggle" onClick={() => setLive((current) => !current)}>
+            {live ? <Pause size={18} /> : <Play size={18} />}
+            {live ? "Pause Live Stream" : "Resume Live Stream"}
+          </button>
+        </div>
       </section>
       <ThreatAlerts
         alerts={alerts}
