@@ -27,7 +27,7 @@ if hasattr(sys.stderr, "reconfigure"):
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from app.services.live_traffic_store import append_live_log
+from app.services.live_traffic_store import append_live_log, classify_attack_type
 
 MODEL_PATH = Path(__file__).resolve().parent / "anomaly_model.pkl"
 FLOW_IDLE_TTL_SECONDS = 90
@@ -175,6 +175,16 @@ class LiveFlowScorer:
             prediction = self._predict(snapshot["packets"], snapshot["bytes"])
             risk_score = self._risk_score_percent(prediction, snapshot["packets"], snapshot["bytes"])
             risk_label = "HIGH-RISK" if risk_score >= 70 else "MEDIUM-RISK" if risk_score >= 40 else "LOW-RISK"
+            attack_type = classify_attack_type(
+                {
+                    "risk_score": risk_score,
+                    "proto": snapshot["proto"],
+                    "packets": snapshot["packets"],
+                    "bytes": snapshot["bytes"],
+                    "dur": snapshot["dur"],
+                    "dst_port": snapshot["dst_port"],
+                }
+            )
 
             append_live_log(
                 {
@@ -200,6 +210,7 @@ class LiveFlowScorer:
                     "label": "Anomaly" if prediction == 1 else "Normal",
                     "risk_score": risk_score,
                     "risk_label": risk_label,
+                    "attack_type": attack_type,
                 }
             )
         except Exception as exc:

@@ -12,6 +12,45 @@ MAX_LIVE_RECORDS = 500
 
 _write_lock = threading.Lock()
 
+COMMON_WEB_PORTS = {80, 443, 8080, 8443}
+COMMON_SERVICE_PORTS = {21, 22, 25, 53, 67, 68, 110, 123, 143, 389, 465, 587, 993, 995}
+
+
+def classify_attack_type(record: dict[str, Any]) -> str:
+    try:
+        risk_score = float(record.get("risk_score", 0) or 0)
+    except (TypeError, ValueError):
+        risk_score = 0.0
+
+    proto = str(record.get("proto", "") or "").lower()
+    packets = int(record.get("packets", 0) or 0)
+    bytes_count = int(record.get("bytes", 0) or 0)
+    duration = float(record.get("dur", 0) or 0)
+    dst_port = int(record.get("dst_port", 0) or 0)
+
+    if risk_score < 40:
+        return "Normal Traffic"
+
+    if proto == "tcp" and (packets >= 40 or bytes_count >= 150_000 or (duration > 0 and packets / max(duration, 0.001) >= 45)):
+        return "DDoS / SYN Flood"
+
+    if packets <= 12 and (proto in {"tcp", "udp", "icmp"} or dst_port in COMMON_SERVICE_PORTS):
+        return "Port Scanning / Recon"
+
+    if proto == "icmp" or dst_port in COMMON_WEB_PORTS or dst_port in COMMON_SERVICE_PORTS:
+        return "Exploit / Protocol Anomaly"
+
+    if proto == "udp" and (packets >= 24 or bytes_count >= 80_000):
+        return "DDoS / SYN Flood"
+
+    return "Exploit / Protocol Anomaly"
+
+
+def normalize_live_record(record: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(record)
+    normalized["attack_type"] = normalized.get("attack_type") or classify_attack_type(normalized)
+    return normalized
+
 
 def _read_records_unlocked() -> list[dict[str, Any]]:
     if not LIVE_TRAFFIC_PATH.exists():
@@ -26,7 +65,7 @@ def _read_records_unlocked() -> list[dict[str, Any]]:
     if not isinstance(data, list):
         return []
 
-    return [item for item in data if isinstance(item, dict)]
+    return [normalize_live_record(item) for item in data if isinstance(item, dict)]
 
 
 def append_live_log(record: dict[str, Any], max_records: int = MAX_LIVE_RECORDS) -> None:
@@ -34,7 +73,7 @@ def append_live_log(record: dict[str, Any], max_records: int = MAX_LIVE_RECORDS)
 
     with _write_lock:
         records = _read_records_unlocked()
-        records.append(record)
+        records.append(normalize_live_record(record))
         records = records[-max_records:]
 
         temp_path = LIVE_TRAFFIC_PATH.with_suffix(".tmp")

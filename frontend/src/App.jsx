@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { GoogleLogin } from "@react-oauth/google";
-import { BarChart3, Download, LogOut, Pause, Play, ShieldCheck, UserCog, Volume2, VolumeX } from "lucide-react";
+import { BarChart3, Download, LayoutDashboard, LogOut, Monitor, Pause, Play, ShieldCheck, UserCog, Volume2, VolumeX } from "lucide-react";
 
-import { downloadAuditReport, getLiveTraffic, getMe, loginWithGoogle, loginWithPassword } from "./api";
+import { downloadAuditReport, downloadThreatIntelLog, getLiveTraffic, getMe, loginWithGoogle, loginWithPassword } from "./api";
 
 const STORAGE_KEY = "netshield_auth";
 
@@ -31,6 +31,52 @@ function formatLiveTimestamp(timestamp) {
   } catch {
     return String(timestamp).slice(11, 19);
   }
+}
+
+function formatAttackType(record) {
+  return record.attack_type || classifyLiveAttackType(record);
+}
+
+function classifyLiveAttackType(record) {
+  const riskScore = Number(record.risk_score || 0);
+  const proto = String(record.proto || "").toLowerCase();
+  const packets = Number(record.packets || 0);
+  const bytesCount = Number(record.bytes || 0);
+  const dstPort = Number(record.dst_port || 0);
+
+  if (riskScore < 40) {
+    return "Normal Traffic";
+  }
+
+  if (proto === "tcp" && (packets >= 40 || bytesCount >= 150000)) {
+    return "DDoS / SYN Flood";
+  }
+
+  if (packets <= 12 || (proto === "icmp" && packets <= 18)) {
+    return "Port Scanning / Recon";
+  }
+
+  if (proto === "udp" && packets >= 24) {
+    return "DDoS / SYN Flood";
+  }
+
+  if (dstPort === 80 || dstPort === 443 || dstPort === 8080 || dstPort === 8443 || proto === "icmp") {
+    return "Exploit / Protocol Anomaly";
+  }
+
+  return "Exploit / Protocol Anomaly";
+}
+
+function getSeverityBucket(record) {
+  const score = Number(record.risk_score || 0);
+  if (score >= 90) return "Critical";
+  if (score >= 70) return "High";
+  if (score >= 40) return "Medium";
+  return "Normal";
+}
+
+function getSeverityClass(record) {
+  return getSeverityBucket(record).toLowerCase();
 }
 
 function LiveLineChart({ points }) {
@@ -104,6 +150,36 @@ function LiveDonutChart({ title, items }) {
   );
 }
 
+function LiveBarChart({ title, items, footnote }) {
+  const safeItems = items.length ? items : [{ name: "No live data", value: 0 }];
+  const maxValue = Math.max(...safeItems.map((item) => item.value), 1);
+
+  return (
+    <div className="chart-panel">
+      <div className="panel-heading">
+        <span>{title}</span>
+        <strong>{footnote || `${safeItems.reduce((sum, item) => sum + item.value, 0).toLocaleString()} packets`}</strong>
+      </div>
+      <div className="bar-chart">
+        {safeItems.slice(0, 6).map((item, index) => {
+          const width = `${Math.max((item.value / maxValue) * 100, item.value > 0 ? 8 : 0)}%`;
+          return (
+            <div key={`${item.name}-${index}`} className="bar-row">
+              <div className="bar-row-meta">
+                <strong>{item.name}</strong>
+                <em>{item.value}</em>
+              </div>
+              <div className="bar-track">
+                <span style={{ width }} data-slice={index} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function LiveTrafficPanel({ records, error }) {
   const highRiskCount = records.filter((record) => record.risk_label === "HIGH-RISK").length;
   const anomalyCount = records.filter((record) => record.prediction === 1).length;
@@ -132,16 +208,17 @@ function LiveTrafficPanel({ records, error }) {
         <div className="live-feed-table-wrap">
           <table className="live-feed-table">
             <thead>
-              <tr>
-                <th>Time</th>
-                <th>Source</th>
-                <th>Destination</th>
-                <th>Proto</th>
-                <th>Packets</th>
-                <th>Bytes</th>
-                <th>Risk</th>
-              </tr>
-            </thead>
+            <tr>
+              <th>Time</th>
+              <th>Source</th>
+              <th>Destination</th>
+              <th>Proto</th>
+              <th>Attack</th>
+              <th>Packets</th>
+              <th>Bytes</th>
+              <th>Risk</th>
+            </tr>
+          </thead>
             <tbody>
               {records.length ? (
                 records.map((record) => (
@@ -150,6 +227,7 @@ function LiveTrafficPanel({ records, error }) {
                     <td>{record.src_ip}</td>
                     <td>{record.dst_ip}</td>
                     <td>{record.proto}</td>
+                    <td>{formatAttackType(record)}</td>
                     <td>{record.packets}</td>
                     <td>{Number(record.bytes || 0).toLocaleString()}</td>
                     <td>
@@ -161,7 +239,7 @@ function LiveTrafficPanel({ records, error }) {
                 ))
               ) : (
                 <tr>
-                  <td colSpan="7">Start live_sniffer.py to stream socket detections here.</td>
+                  <td colSpan="8">Start live_sniffer.py to stream socket detections here.</td>
                 </tr>
               )}
             </tbody>
@@ -201,7 +279,7 @@ function ThreatAlerts({ alerts, audioMuted, onDismiss, onClear, onToggleAudio })
       {latestAlert ? (
         <div className="threat-alert-banner" role="alert">
           <div className="threat-alert-copy">
-            <span>⚠️ HIGH RISK ANOMALY DETECTED</span>
+            <span>HIGH RISK ANOMALY DETECTED</span>
             <strong>
               Src: {latestAlert.src_ip} -&gt; Dst: {latestAlert.dst_ip} | Protocol: {String(latestAlert.proto || "unknown").toUpperCase()} | Risk:{" "}
               {Number(latestAlert.risk_score || 0).toFixed(1)}%
@@ -238,12 +316,26 @@ function buildLiveTrafficTrend(records) {
 
 function buildLiveRiskMix(records) {
   const counts = records.reduce((acc, record) => {
-    const key = record.prediction === 1 || record.risk_label === "HIGH-RISK" ? "High Risk / Anomaly" : "Normal";
+    const key = getSeverityBucket(record);
     acc[key] = (acc[key] || 0) + 1;
     return acc;
   }, {});
 
-  return Object.entries(counts).map(([name, value]) => ({ name, value }));
+  return ["Critical", "High", "Medium", "Normal"]
+    .map((name) => ({ name, value: counts[name] || 0 }))
+    .filter((item) => item.value > 0 || records.length === 0);
+}
+
+function buildLiveAttackTypeMix(records) {
+  const counts = records.reduce((acc, record) => {
+    const key = formatAttackType(record);
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+
+  return Object.entries(counts)
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value);
 }
 
 function buildLiveProtocolMix(records) {
@@ -258,6 +350,37 @@ function buildLiveProtocolMix(records) {
     .sort((a, b) => b.value - a.value);
 }
 
+function buildLiveSeverityBars(records) {
+  return [
+    { name: "Critical", value: records.filter((record) => getSeverityBucket(record) === "Critical").length },
+    { name: "High", value: records.filter((record) => getSeverityBucket(record) === "High").length },
+    { name: "Medium", value: records.filter((record) => getSeverityBucket(record) === "Medium").length },
+    { name: "Normal", value: records.filter((record) => getSeverityBucket(record) === "Normal").length },
+  ];
+}
+
+function buildLiveSummaryMetrics(records) {
+  const uniqueSources = new Set(records.map((record) => record.src_ip).filter(Boolean)).size;
+  const uniqueDestinations = new Set(records.map((record) => record.dst_ip).filter(Boolean)).size;
+  const attackTypes = new Set(records.map((record) => formatAttackType(record))).size;
+  const averageRisk = records.length
+    ? records.reduce((sum, record) => sum + Number(record.risk_score || 0), 0) / records.length
+    : 0;
+
+  return {
+    totalPackets: records.length,
+    attackFlows: records.filter((record) => Number(record.risk_score || 0) >= 70).length,
+    critical: records.filter((record) => getSeverityBucket(record) === "Critical").length,
+    high: records.filter((record) => getSeverityBucket(record) === "High").length,
+    medium: records.filter((record) => getSeverityBucket(record) === "Medium").length,
+    normal: records.filter((record) => getSeverityBucket(record) === "Normal").length,
+    averageRisk: Number(averageRisk.toFixed(1)),
+    uniqueSources,
+    uniqueDestinations,
+    attackTypes,
+  };
+}
+
 function AnalystTrafficDashboard() {
   const [livePackets, setLivePackets] = useState([]);
   const [liveTrafficError, setLiveTrafficError] = useState("");
@@ -265,10 +388,12 @@ function AnalystTrafficDashboard() {
   const [seenAlertIds, setSeenAlertIds] = useState(() => new Set());
   const [audioMuted, setAudioMuted] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [activeTab, setActiveTab] = useState("overview");
+  const [monitorFilter, setMonitorFilter] = useState("all");
   const audioContextRef = useRef(null);
   const [live, setLive] = useState(true);
 
-  function playAlertBeep() {
+  function playAlertSiren() {
     if (audioMuted) return;
 
     try {
@@ -278,32 +403,51 @@ function AnalystTrafficDashboard() {
       const audioContext = audioContextRef.current || new AudioContextClass();
       audioContextRef.current = audioContext;
 
-      const playTone = () => {
-        const now = audioContext.currentTime;
+      const scheduleTone = (startTime, frequency, duration, gainLevel = 0.06, wave = "sine") => {
         const gain = audioContext.createGain();
-        gain.gain.setValueAtTime(0.0001, now);
-        gain.gain.exponentialRampToValueAtTime(0.12, now + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.32);
+        const oscillator = audioContext.createOscillator();
+        oscillator.type = wave;
+        oscillator.frequency.setValueAtTime(frequency, startTime);
+        gain.gain.setValueAtTime(0.0001, startTime);
+        gain.gain.exponentialRampToValueAtTime(gainLevel, startTime + 0.04);
+        gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration + 0.05);
+        oscillator.connect(gain);
         gain.connect(audioContext.destination);
+        oscillator.start(startTime);
+        oscillator.stop(startTime + duration + 0.08);
+      };
 
-        [0, 0.15].forEach((offset) => {
-          const oscillator = audioContext.createOscillator();
-          oscillator.type = "sawtooth";
-          oscillator.frequency.setValueAtTime(880, now + offset);
-          oscillator.frequency.exponentialRampToValueAtTime(620, now + offset + 0.12);
-          oscillator.connect(gain);
-          oscillator.start(now + offset);
-          oscillator.stop(now + offset + 0.12);
-        });
+      const scheduleSweep = (startTime, fromFreq, toFreq, duration, gainLevel = 0.08) => {
+        const gain = audioContext.createGain();
+        const oscillator = audioContext.createOscillator();
+        oscillator.type = "triangle";
+        oscillator.frequency.setValueAtTime(fromFreq, startTime);
+        oscillator.frequency.exponentialRampToValueAtTime(toFreq, startTime + duration);
+        gain.gain.setValueAtTime(0.0001, startTime);
+        gain.gain.exponentialRampToValueAtTime(gainLevel, startTime + 0.05);
+        gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration + 0.06);
+        oscillator.connect(gain);
+        gain.connect(audioContext.destination);
+        oscillator.start(startTime);
+        oscillator.stop(startTime + duration + 0.1);
+      };
+
+      const performSiren = () => {
+        const now = audioContext.currentTime + 0.02;
+        scheduleSweep(now, 880, 587, 0.3, 0.08);
+        scheduleTone(now + 0.15, 740, 0.13, 0.045, "sine");
+        scheduleSweep(now + 0.34, 587, 880, 0.3, 0.075);
+        scheduleTone(now + 0.5, 659, 0.14, 0.04, "sine");
+        scheduleSweep(now + 0.68, 784, 659, 0.24, 0.06);
       };
 
       if (audioContext.state === "suspended") {
-        audioContext.resume().then(playTone).catch(() => {});
+        audioContext.resume().then(performSiren).catch(() => {});
       } else {
-        playTone();
+        performSiren();
       }
     } catch {
-      // Some browsers block audio before user interaction; alert UI still works.
+      // Audio is optional; the visual alert path still works if the browser blocks it.
     }
   }
 
@@ -338,7 +482,7 @@ function AnalystTrafficDashboard() {
 
           if (newAlerts.length) {
             setAlerts((currentAlerts) => [...newAlerts, ...currentAlerts].slice(0, 12));
-            playAlertBeep();
+            playAlertSiren();
           }
 
           return nextSeenIds;
@@ -376,14 +520,18 @@ function AnalystTrafficDashboard() {
   }, [alerts.length]);
 
   const latestPackets = livePackets.slice(0, 20);
+  const overviewPreview = livePackets.slice(0, 6);
   const observedPackets = livePackets.length;
-  const attackFlows = livePackets.filter((record) => record.prediction === 1).length;
-  const highRiskCount = livePackets.filter((record) => record.risk_label === "HIGH-RISK").length;
-  const mediumRiskCount = livePackets.filter((record) => record.risk_label === "MEDIUM-RISK").length;
-  const lowRiskCount = livePackets.filter((record) => record.risk_label === "LOW-RISK").length;
-  const trafficTrend = buildLiveTrafficTrend(livePackets);
-  const riskMix = buildLiveRiskMix(livePackets);
+  const attackFlows = livePackets.filter((record) => Number(record.risk_score || 0) >= 70).length;
+  const highRiskCount = livePackets.filter((record) => getSeverityBucket(record) === "High").length;
+  const mediumRiskCount = livePackets.filter((record) => getSeverityBucket(record) === "Medium").length;
+  const lowRiskCount = livePackets.filter((record) => getSeverityBucket(record) === "Normal").length;
+  const attackTypeMix = buildLiveAttackTypeMix(livePackets);
+  const severityBars = buildLiveSeverityBars(livePackets);
+  const severityMix = buildLiveRiskMix(livePackets);
   const protocolMix = buildLiveProtocolMix(livePackets);
+  const summaryMetrics = buildLiveSummaryMetrics(livePackets);
+  const monitorRecords = monitorFilter === "anomalies" ? latestPackets.filter((record) => Number(record.risk_score || 0) >= 70) : latestPackets;
 
   async function handleExportAuditReport() {
     setExporting(true);
@@ -398,43 +546,265 @@ function AnalystTrafficDashboard() {
     }
   }
 
+  async function handleDownloadThreatLog() {
+    setExporting(true);
+    setLiveTrafficError("");
+
+    try {
+      await downloadThreatIntelLog();
+    } catch (err) {
+      setLiveTrafficError(err.message);
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  const tabs = [
+    { id: "overview", label: "Analyst Overview", icon: ShieldCheck },
+    { id: "analytics", label: "Attack Analytics", icon: BarChart3 },
+    { id: "monitor", label: "Live Packet Monitor", icon: Monitor },
+    { id: "reports", label: "Security Audit & Reports", icon: Download },
+  ];
+
   return (
-    <>
-      <section className="stream-toolbar">
-        <div>
-          <span>Live Analysis</span>
-          <strong>{live ? "Streaming traffic windows" : "Stream paused"}</strong>
+    <section className="workspace-shell">
+      <aside className="dashboard-sidebar">
+        <div className="sidebar-brand">
+          <span>NetShield SOC</span>
+          <strong>Live threat command</strong>
         </div>
-        <div className="stream-actions">
-          <button className="export-report-button" onClick={handleExportAuditReport} disabled={exporting}>
-            <Download size={17} />
-            {exporting ? "Exporting..." : "Export Audit Report"}
-          </button>
-          <button className="stream-toggle" onClick={() => setLive((current) => !current)}>
-            {live ? <Pause size={18} /> : <Play size={18} />}
-            {live ? "Pause Live Stream" : "Resume Live Stream"}
-          </button>
+        <div className="sidebar-tabs">
+          {tabs.map((tab) => {
+            const TabIcon = tab.icon;
+            return (
+              <button
+                key={tab.id}
+                className={`sidebar-tab ${activeTab === tab.id ? "active" : ""}`}
+                onClick={() => setActiveTab(tab.id)}
+              >
+                <TabIcon size={16} />
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
         </div>
-      </section>
-      <ThreatAlerts
-        alerts={alerts}
-        audioMuted={audioMuted}
-        onDismiss={(alertId) => setAlerts((currentAlerts) => currentAlerts.filter((alert) => alert.id !== alertId))}
-        onClear={() => setAlerts([])}
-        onToggleAudio={() => setAudioMuted((current) => !current)}
-      />
-      <section className="stats-grid">
-        <Stat label="Observed packets" value={observedPackets.toLocaleString()} />
-        <Stat label="Attack flows" value={attackFlows.toLocaleString()} />
-        <Stat label="Risk levels" value={`H ${highRiskCount} / M ${mediumRiskCount} / L ${lowRiskCount}`} />
-      </section>
-      <LiveTrafficPanel records={latestPackets} error={liveTrafficError} />
-      <section className="charts-grid">
-        <LiveLineChart points={trafficTrend} />
-        <LiveDonutChart title="Attack / Anomaly Mix" items={riskMix} />
-        <LiveDonutChart title="Protocol Mix" items={protocolMix} />
-      </section>
-    </>
+        <div className="sidebar-footer">
+          <span>Active Alerts</span>
+          <strong>{alerts.length}</strong>
+        </div>
+      </aside>
+
+      <div className="dashboard-main">
+        <section className="stream-toolbar workspace-toolbar">
+          <div>
+            <span>Live Analysis</span>
+            <strong>{live ? "Streaming traffic windows" : "Stream paused"}</strong>
+          </div>
+          <div className="stream-actions">
+            <span className="alert-counter-chip">{alerts.length} active alerts</span>
+            <button className="export-report-button" onClick={handleExportAuditReport} disabled={exporting}>
+              <Download size={17} />
+              {exporting ? "Exporting..." : "Export Audit Report"}
+            </button>
+            <button className="export-report-button" onClick={handleDownloadThreatLog} disabled={exporting}>
+              <Download size={17} />
+              {exporting ? "Downloading..." : "Threat Log"}
+            </button>
+            <button className="stream-toggle" onClick={() => setLive((current) => !current)}>
+              {live ? <Pause size={18} /> : <Play size={18} />}
+              {live ? "Pause Live Stream" : "Resume Live Stream"}
+            </button>
+          </div>
+        </section>
+
+        <ThreatAlerts
+          alerts={alerts}
+          audioMuted={audioMuted}
+          onDismiss={(alertId) => setAlerts((currentAlerts) => currentAlerts.filter((alert) => alert.id !== alertId))}
+          onClear={() => setAlerts([])}
+          onToggleAudio={() => setAudioMuted((current) => !current)}
+        />
+
+        {activeTab === "overview" ? (
+          <section className="tab-panel tab-overview">
+            <section className="stats-grid">
+              <Stat label="Observed packets" value={summaryMetrics.totalPackets.toLocaleString()} />
+              <Stat label="Attack flows" value={attackFlows.toLocaleString()} />
+              <Stat label="Risk levels" value={`H ${highRiskCount} / M ${mediumRiskCount} / L ${lowRiskCount}`} />
+            </section>
+            <div className="overview-grid">
+              <div className="overview-card overview-alerts">
+                <div className="panel-heading">
+                  <span>Active Alerts</span>
+                  <strong>{alerts.length} live</strong>
+                </div>
+                <ThreatAlerts
+                  alerts={alerts}
+                  audioMuted={audioMuted}
+                  onDismiss={(alertId) => setAlerts((currentAlerts) => currentAlerts.filter((alert) => alert.id !== alertId))}
+                  onClear={() => setAlerts([])}
+                  onToggleAudio={() => setAudioMuted((current) => !current)}
+                />
+              </div>
+              <div className="overview-card overview-preview">
+                <div className="panel-heading">
+                  <span>Live Socket Feed Preview</span>
+                  <strong>{overviewPreview.length} latest packets</strong>
+                </div>
+                <LiveTrafficPanel records={overviewPreview} error={liveTrafficError} />
+              </div>
+            </div>
+          </section>
+        ) : null}
+
+        {activeTab === "analytics" ? (
+          <section className="tab-panel">
+            <section className="stats-grid">
+              <Stat label="Critical" value={summaryMetrics.critical.toLocaleString()} />
+              <Stat label="High" value={summaryMetrics.high.toLocaleString()} />
+              <Stat label="Medium" value={summaryMetrics.medium.toLocaleString()} />
+            </section>
+            <div className="charts-grid analytics-grid">
+              <LiveBarChart title="Attack Name Distribution" items={attackTypeMix} footnote={`${summaryMetrics.attackTypes} attack signatures`} />
+              <LiveBarChart title="Severity Distribution" items={severityBars} footnote={`Average risk ${summaryMetrics.averageRisk}%`} />
+              <LiveDonutChart title="Protocol Threat Distribution" items={protocolMix} />
+            </div>
+            <div className="charts-grid analytics-grid secondary">
+              <LiveDonutChart title="Threat Severity Split" items={severityMix} />
+              <LiveDonutChart title="Protocol Mix" items={protocolMix} />
+              <LiveBarChart title="Attack Flow Density" items={attackTypeMix} footnote={`${summaryMetrics.attackFlows} high-risk flows`} />
+            </div>
+          </section>
+        ) : null}
+
+        {activeTab === "monitor" ? (
+          <section className="tab-panel">
+            <div className="monitor-toolbar">
+              <div>
+                <span>Real-Time Filter</span>
+                <strong>Show live traffic or anomalies only</strong>
+              </div>
+              <div className="filter-group">
+                <button
+                  className={`filter-chip ${monitorFilter === "all" ? "active" : ""}`}
+                  onClick={() => setMonitorFilter("all")}
+                >
+                  Show All
+                </button>
+                <button
+                  className={`filter-chip ${monitorFilter === "anomalies" ? "active" : ""}`}
+                  onClick={() => setMonitorFilter("anomalies")}
+                >
+                  Show Anomalies Only
+                </button>
+              </div>
+            </div>
+            <section className="monitor-panel">
+              <div className="panel-heading">
+                <span>Live Packet Monitor</span>
+                <strong>{monitorRecords.length} visible flows</strong>
+              </div>
+              <div className="live-feed-table-wrap monitor-table-wrap">
+                <table className="live-feed-table monitor-table">
+                  <thead>
+                    <tr>
+                      <th>Time</th>
+                      <th>Source</th>
+                      <th>Destination</th>
+                      <th>Proto</th>
+                      <th>Attack Type</th>
+                      <th>Severity</th>
+                      <th>Packets</th>
+                      <th>Bytes</th>
+                      <th>Risk</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {monitorRecords.length ? (
+                      monitorRecords.map((record) => (
+                        <tr key={record.id || `${record.timestamp}-${record.src_ip}-${record.dst_ip}`}>
+                          <td>{formatLiveTimestamp(record.timestamp)}</td>
+                          <td>{record.src_ip}</td>
+                          <td>{record.dst_ip}</td>
+                          <td>{record.proto}</td>
+                          <td>{formatAttackType(record)}</td>
+                          <td>
+                            <span className={`severity-pill ${getSeverityClass(record)}`}>{getSeverityBucket(record)}</span>
+                          </td>
+                          <td>{record.packets}</td>
+                          <td>{Number(record.bytes || 0).toLocaleString()}</td>
+                          <td>
+                            <span className={`risk-pill ${String(record.risk_label || "LOW-RISK").toLowerCase()}`}>
+                              {Number(record.risk_score || 0).toFixed(1)}%
+                            </span>
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan="9">No live packets match the current filter.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </section>
+        ) : null}
+
+        {activeTab === "reports" ? (
+          <section className="tab-panel">
+            <section className="stats-grid reports-grid">
+              <Stat label="Observed packets" value={summaryMetrics.totalPackets.toLocaleString()} />
+              <Stat label="Unique sources" value={summaryMetrics.uniqueSources.toLocaleString()} />
+              <Stat label="Unique destinations" value={summaryMetrics.uniqueDestinations.toLocaleString()} />
+            </section>
+            <div className="reports-grid-panel">
+              <div className="report-actions-card">
+                <div className="panel-heading">
+                  <span>Export Center</span>
+                  <strong>Audit and intelligence downloads</strong>
+                </div>
+                <div className="report-action-list">
+                  <button className="export-report-button report-button" onClick={handleExportAuditReport} disabled={exporting}>
+                    <Download size={17} />
+                    Export CSV Audit Report
+                  </button>
+                  <button className="export-report-button report-button" onClick={handleDownloadThreatLog} disabled={exporting}>
+                    <Download size={17} />
+                    Download Threat Intelligence Log
+                  </button>
+                </div>
+              </div>
+              <div className="report-metrics-card">
+                <div className="panel-heading">
+                  <span>Dataset Summary</span>
+                  <strong>Live packet intelligence</strong>
+                </div>
+                <div className="report-summary-grid">
+                  <div>
+                    <span>Total Packets</span>
+                    <strong>{summaryMetrics.totalPackets.toLocaleString()}</strong>
+                  </div>
+                  <div>
+                    <span>High Risk</span>
+                    <strong>{summaryMetrics.high.toLocaleString()}</strong>
+                  </div>
+                  <div>
+                    <span>Average Risk</span>
+                    <strong>{summaryMetrics.averageRisk}%</strong>
+                  </div>
+                  <div>
+                    <span>Attack Types</span>
+                    <strong>{summaryMetrics.attackTypes.toLocaleString()}</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+        ) : null}
+      </div>
+    </section>
   );
 }
 

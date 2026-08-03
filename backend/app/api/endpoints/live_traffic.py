@@ -1,4 +1,5 @@
 import csv
+import json
 from io import StringIO
 
 from fastapi import APIRouter, Query
@@ -74,4 +75,25 @@ async def export_live_traffic_report():
         content=output.getvalue(),
         media_type="text/csv",
         headers={"Content-Disposition": 'attachment; filename="NetShield_Security_Audit_Report.csv"'},
+    )
+
+
+@router.get("/live-traffic/logs")
+async def download_threat_intelligence_log():
+    try:
+        records = get_all_live_logs()
+        content = json.dumps(records, ensure_ascii=False, indent=2)
+    except Exception as exc:
+        content = json.dumps(
+            {
+                "error": f"Unable to export live traffic log: {exc}",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    return Response(
+        content=content,
+        media_type="application/json",
+        headers={"Content-Disposition": 'attachment; filename="NetShield_Threat_Intelligence_Log.json"'},
     )

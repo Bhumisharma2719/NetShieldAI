@@ -72,3 +72,27 @@ export async function downloadAuditReport() {
   link.remove();
   window.URL.revokeObjectURL(downloadUrl);
 }
+
+export async function downloadThreatIntelLog() {
+  let response;
+
+  try {
+    response = await fetch(`${API_URL}/live-traffic/logs`);
+  } catch {
+    throw new Error("Backend is not reachable. Check that FastAPI is running on port 8000.");
+  }
+
+  if (!response.ok) {
+    throw new Error("Threat intelligence log download failed");
+  }
+
+  const blob = await response.blob();
+  const downloadUrl = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = downloadUrl;
+  link.download = "NetShield_Threat_Intelligence_Log.json";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(downloadUrl);
+}
