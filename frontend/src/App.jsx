@@ -150,6 +150,76 @@ function LiveDonutChart({ title, items }) {
   );
 }
 
+function LivePieChart({ title, items }) {
+  const safeItems = items.length ? items : [{ name: "No live data", value: 1 }];
+  const total = safeItems.reduce((sum, item) => sum + item.value, 0) || 1;
+  const radius = 42;
+  const center = 50;
+  let cumulative = 0;
+
+  function describeArc(startAngle, endAngle) {
+    const start = polarToCartesian(center, center, radius, endAngle);
+    const end = polarToCartesian(center, center, radius, startAngle);
+    const largeArcFlag = endAngle - startAngle <= 180 ? "0" : "1";
+    return [
+      "M",
+      center,
+      center,
+      "L",
+      start.x,
+      start.y,
+      "A",
+      radius,
+      radius,
+      0,
+      largeArcFlag,
+      0,
+      end.x,
+      end.y,
+      "Z",
+    ].join(" ");
+  }
+
+  function polarToCartesian(cx, cy, r, angleInDegrees) {
+    const angleInRadians = ((angleInDegrees - 90) * Math.PI) / 180.0;
+    return {
+      x: cx + r * Math.cos(angleInRadians),
+      y: cy + r * Math.sin(angleInRadians),
+    };
+  }
+
+  return (
+    <div className="chart-panel pie-panel">
+      <div className="panel-heading">
+        <span>{title}</span>
+        <strong>{items.length ? `${total.toLocaleString()} packets` : "Waiting"}</strong>
+      </div>
+      <div className="pie-wrap">
+        <svg viewBox="0 0 100 100" className="pie-chart" role="img" aria-label={`${title} live pie chart`}>
+          <circle cx="50" cy="50" r={radius} className="pie-base" />
+          {safeItems.slice(0, 6).map((item, index) => {
+            const slice = (item.value / total) * 360;
+            const startAngle = cumulative;
+            const endAngle = cumulative + slice;
+            cumulative += slice;
+            return <path key={`${item.name}-${index}`} d={describeArc(startAngle, endAngle)} data-slice={index} />;
+          })}
+          <circle cx="50" cy="50" r="22" className="pie-hole" />
+        </svg>
+        <div className="legend-list">
+          {safeItems.slice(0, 5).map((item, index) => (
+            <div key={`${item.name}-${index}`} className="legend-row">
+              <span data-slice={index} />
+              <strong>{item.name}</strong>
+              <em>{item.value}</em>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function LiveBarChart({ title, items, footnote }) {
   const safeItems = items.length ? items : [{ name: "No live data", value: 0 }];
   const maxValue = Math.max(...safeItems.map((item) => item.value), 1);
@@ -250,15 +320,15 @@ function LiveTrafficPanel({ records, error }) {
   );
 }
 
-function ThreatAlerts({ alerts, audioMuted, onDismiss, onClear, onToggleAudio }) {
+function ThreatBanner({ alerts, audioMuted, onDismiss, onClear, onToggleAudio }) {
   const latestAlert = alerts[0];
 
   return (
-    <section className={`alert-console ${latestAlert ? "active" : ""}`}>
+    <section className={`threat-banner ${latestAlert ? "active" : "idle"}`}>
       <div className="alert-console-head">
         <div>
-          <span>Active Alerts</span>
-          <strong>{alerts.length}</strong>
+          <span>Active High-Risk Alert</span>
+          <strong>{latestAlert ? "Live anomaly under watch" : "No active high-risk anomalies"}</strong>
         </div>
         <div className="alert-actions">
           <button
@@ -381,7 +451,7 @@ function buildLiveSummaryMetrics(records) {
   };
 }
 
-function AnalystTrafficDashboard() {
+function AnalystTrafficDashboard({ currentUser }) {
   const [livePackets, setLivePackets] = useState([]);
   const [liveTrafficError, setLiveTrafficError] = useState("");
   const [alerts, setAlerts] = useState([]);
@@ -527,9 +597,9 @@ function AnalystTrafficDashboard() {
   const mediumRiskCount = livePackets.filter((record) => getSeverityBucket(record) === "Medium").length;
   const lowRiskCount = livePackets.filter((record) => getSeverityBucket(record) === "Normal").length;
   const attackTypeMix = buildLiveAttackTypeMix(livePackets);
-  const severityBars = buildLiveSeverityBars(livePackets);
   const severityMix = buildLiveRiskMix(livePackets);
   const protocolMix = buildLiveProtocolMix(livePackets);
+  const trafficTrend = buildLiveTrafficTrend(livePackets);
   const summaryMetrics = buildLiveSummaryMetrics(livePackets);
   const monitorRecords = monitorFilter === "anomalies" ? latestPackets.filter((record) => Number(record.risk_score || 0) >= 70) : latestPackets;
 
@@ -568,111 +638,82 @@ function AnalystTrafficDashboard() {
 
   return (
     <section className="workspace-shell">
-      <aside className="dashboard-sidebar">
-        <div className="sidebar-brand">
-          <span>NetShield SOC</span>
-          <strong>Live threat command</strong>
+      <header className="dashboard-header">
+        <div className="header-brand">
+          <ShieldCheck size={24} />
+          <div>
+            <span>NetShield AI</span>
+            <strong>Analyst Dashboard</strong>
+          </div>
         </div>
-        <div className="sidebar-tabs">
-          {tabs.map((tab) => {
-            const TabIcon = tab.icon;
-            return (
-              <button
-                key={tab.id}
-                className={`sidebar-tab ${activeTab === tab.id ? "active" : ""}`}
-                onClick={() => setActiveTab(tab.id)}
-              >
-                <TabIcon size={16} />
-                <span>{tab.label}</span>
-              </button>
-            );
-          })}
+        <div className="header-meta">
+          <div className="user-badge">
+            <span>Current user</span>
+            <strong>{currentUser?.name || currentUser?.user_id || "Analyst"}</strong>
+            <em>{String(currentUser?.role || "analyst").toUpperCase()}</em>
+          </div>
+          <button className="stream-toggle" onClick={() => setLive((current) => !current)}>
+            {live ? <Pause size={18} /> : <Play size={18} />}
+            {live ? "Pause Live Stream" : "Resume Live Stream"}
+          </button>
         </div>
-        <div className="sidebar-footer">
-          <span>Active Alerts</span>
-          <strong>{alerts.length}</strong>
-        </div>
-      </aside>
+      </header>
+
+      <nav className="tab-nav" aria-label="Dashboard sections">
+        {tabs.map((tab) => {
+          const TabIcon = tab.icon;
+          return (
+            <button
+              key={tab.id}
+              className={`tab-pill ${activeTab === tab.id ? "active" : ""}`}
+              onClick={() => setActiveTab(tab.id)}
+            >
+              <TabIcon size={16} />
+              <span>{tab.label}</span>
+            </button>
+          );
+        })}
+      </nav>
 
       <div className="dashboard-main">
-        <section className="stream-toolbar workspace-toolbar">
-          <div>
-            <span>Live Analysis</span>
-            <strong>{live ? "Streaming traffic windows" : "Stream paused"}</strong>
-          </div>
-          <div className="stream-actions">
-            <span className="alert-counter-chip">{alerts.length} active alerts</span>
-            <button className="export-report-button" onClick={handleExportAuditReport} disabled={exporting}>
-              <Download size={17} />
-              {exporting ? "Exporting..." : "Export Audit Report"}
-            </button>
-            <button className="export-report-button" onClick={handleDownloadThreatLog} disabled={exporting}>
-              <Download size={17} />
-              {exporting ? "Downloading..." : "Threat Log"}
-            </button>
-            <button className="stream-toggle" onClick={() => setLive((current) => !current)}>
-              {live ? <Pause size={18} /> : <Play size={18} />}
-              {live ? "Pause Live Stream" : "Resume Live Stream"}
-            </button>
-          </div>
-        </section>
-
-        <ThreatAlerts
-          alerts={alerts}
-          audioMuted={audioMuted}
-          onDismiss={(alertId) => setAlerts((currentAlerts) => currentAlerts.filter((alert) => alert.id !== alertId))}
-          onClear={() => setAlerts([])}
-          onToggleAudio={() => setAudioMuted((current) => !current)}
-        />
 
         {activeTab === "overview" ? (
           <section className="tab-panel tab-overview">
-            <section className="stats-grid">
+            <section className="stats-grid overview-kpis">
               <Stat label="Observed packets" value={summaryMetrics.totalPackets.toLocaleString()} />
               <Stat label="Attack flows" value={attackFlows.toLocaleString()} />
               <Stat label="Risk levels" value={`H ${highRiskCount} / M ${mediumRiskCount} / L ${lowRiskCount}`} />
             </section>
-            <div className="overview-grid">
-              <div className="overview-card overview-alerts">
-                <div className="panel-heading">
-                  <span>Active Alerts</span>
-                  <strong>{alerts.length} live</strong>
-                </div>
-                <ThreatAlerts
-                  alerts={alerts}
-                  audioMuted={audioMuted}
-                  onDismiss={(alertId) => setAlerts((currentAlerts) => currentAlerts.filter((alert) => alert.id !== alertId))}
-                  onClear={() => setAlerts([])}
-                  onToggleAudio={() => setAudioMuted((current) => !current)}
-                />
-              </div>
-              <div className="overview-card overview-preview">
-                <div className="panel-heading">
-                  <span>Live Socket Feed Preview</span>
-                  <strong>{overviewPreview.length} latest packets</strong>
-                </div>
-                <LiveTrafficPanel records={overviewPreview} error={liveTrafficError} />
-              </div>
-            </div>
+
+            <ThreatBanner
+              alerts={alerts}
+              audioMuted={audioMuted}
+              onDismiss={(alertId) => setAlerts((currentAlerts) => currentAlerts.filter((alert) => alert.id !== alertId))}
+              onClear={() => setAlerts([])}
+              onToggleAudio={() => setAudioMuted((current) => !current)}
+            />
+
+            <LiveTrafficPanel records={latestPackets} error={liveTrafficError} />
           </section>
         ) : null}
 
         {activeTab === "analytics" ? (
           <section className="tab-panel">
-            <section className="stats-grid">
+            <section className="stats-grid analytics-stats">
               <Stat label="Critical" value={summaryMetrics.critical.toLocaleString()} />
               <Stat label="High" value={summaryMetrics.high.toLocaleString()} />
               <Stat label="Medium" value={summaryMetrics.medium.toLocaleString()} />
             </section>
-            <div className="charts-grid analytics-grid">
-              <LiveBarChart title="Attack Name Distribution" items={attackTypeMix} footnote={`${summaryMetrics.attackTypes} attack signatures`} />
-              <LiveBarChart title="Severity Distribution" items={severityBars} footnote={`Average risk ${summaryMetrics.averageRisk}%`} />
-              <LiveDonutChart title="Protocol Threat Distribution" items={protocolMix} />
+
+            <div className="analytics-grid analytics-primary">
+              <LivePieChart title="Attack Mix" items={attackTypeMix} />
+              <LiveLineChart points={trafficTrend} />
+              <LiveBarChart title="Protocol Distribution" items={protocolMix} footnote={`${summaryMetrics.attackFlows} high-risk flows`} />
             </div>
-            <div className="charts-grid analytics-grid secondary">
+
+            <div className="analytics-grid analytics-secondary">
               <LiveDonutChart title="Threat Severity Split" items={severityMix} />
-              <LiveDonutChart title="Protocol Mix" items={protocolMix} />
-              <LiveBarChart title="Attack Flow Density" items={attackTypeMix} footnote={`${summaryMetrics.attackFlows} high-risk flows`} />
+              <LiveBarChart title="Attack Flow Density" items={buildLiveSeverityBars(livePackets)} footnote={`Average risk ${summaryMetrics.averageRisk}%`} />
             </div>
           </section>
         ) : null}
@@ -810,42 +851,35 @@ function AnalystTrafficDashboard() {
 
 function Dashboard({ session, onLogout }) {
   const isAdmin = session.user.role === "admin";
-  const title = isAdmin ? "Admin Dashboard" : "Analyst Dashboard";
-  const Icon = isAdmin ? UserCog : BarChart3;
 
   return (
     <main className="dashboard-shell">
-      <nav className="topbar">
-        <div className="brand-mark">
-          <ShieldCheck size={24} />
-          <span>NetShield AI</span>
-        </div>
-        <button className="icon-button" onClick={onLogout} aria-label="Logout" title="Logout">
-          <LogOut size={20} />
-        </button>
-      </nav>
-
-      <section className="dashboard-hero">
-        <div>
-          <p className="eyebrow">{session.user.role}</p>
-          <h1>{title}</h1>
-          <p>
-            Welcome, {session.user.name || session.user.user_id}. Your authenticated workspace is ready.
-          </p>
-        </div>
-        <div className="role-badge">
-          <Icon size={32} />
-        </div>
-      </section>
-
       {isAdmin ? (
-        <section className="stats-grid">
-          <Stat label="Managed users" value="2" />
-          <Stat label="Active roles" value="Admin + Analyst" />
-          <Stat label="Auth status" value="JWT secured" />
+        <section className="admin-shell">
+          <nav className="topbar">
+            <div className="brand-mark">
+              <ShieldCheck size={24} />
+              <span>NetShield AI</span>
+            </div>
+            <div className="header-actions">
+              <div className="user-badge compact">
+                <span>Current user</span>
+                <strong>{session.user.name || session.user.user_id}</strong>
+                <em>ADMIN</em>
+              </div>
+              <button className="icon-button" onClick={onLogout} aria-label="Logout" title="Logout">
+                <LogOut size={20} />
+              </button>
+            </div>
+          </nav>
+          <section className="stats-grid">
+            <Stat label="Managed users" value="2" />
+            <Stat label="Active roles" value="Admin + Analyst" />
+            <Stat label="Auth status" value="JWT secured" />
+          </section>
         </section>
       ) : (
-        <AnalystTrafficDashboard />
+        <AnalystTrafficDashboard currentUser={session.user} />
       )}
     </main>
   );
