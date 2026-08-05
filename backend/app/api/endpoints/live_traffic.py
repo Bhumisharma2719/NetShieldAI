@@ -5,7 +5,7 @@ from io import StringIO
 from fastapi import APIRouter, Query
 from fastapi.responses import Response
 
-from app.services.live_traffic_store import get_all_live_logs, get_latest_live_logs
+from app.services.live_traffic_store import get_all_live_logs, get_alerts_history, get_latest_live_logs
 
 router = APIRouter(tags=["live-traffic"])
 
@@ -97,3 +97,35 @@ async def download_threat_intelligence_log():
         media_type="application/json",
         headers={"Content-Disposition": 'attachment; filename="NetShield_Threat_Intelligence_Log.json"'},
     )
+
+
+@router.get("/live-traffic/alerts-history")
+async def alerts_history():
+    try:
+        records = get_alerts_history()
+        if not records:
+            live_records = get_all_live_logs()
+            records = [
+                {
+                    "timestamp": record.get("timestamp"),
+                    "src_ip": record.get("src_ip"),
+                    "dst_ip": record.get("dst_ip"),
+                    "protocol": record.get("protocol") or record.get("proto"),
+                    "risk_score": record.get("risk_score", 0),
+                    "attack_type": record.get("attack_type") or record.get("attack_cat") or "High Risk",
+                }
+                for record in live_records
+                if _safe_risk_score(record.get("risk_score", 0)) >= 70
+            ]
+    except Exception as exc:
+        return {"records": [], "count": 0, "error": f"Unable to read alerts history: {exc}"}
+
+    records = sorted(records, key=lambda item: str(item.get("timestamp", "")), reverse=True)
+    return {"records": records, "count": len(records)}
+
+
+def _safe_risk_score(value) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0

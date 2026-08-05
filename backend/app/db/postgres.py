@@ -51,11 +51,13 @@ async def create_tables() -> None:
                     provider VARCHAR(50) NOT NULL DEFAULT 'password',
                     is_active BOOLEAN NOT NULL DEFAULT TRUE,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    last_login_at TIMESTAMPTZ
                 )
                 """
             )
         )
+        await connection.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ"))
         await connection.execute(
             text(
                 """

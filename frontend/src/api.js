@@ -17,6 +17,16 @@ async function request(path, options = {}) {
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
+    if (Array.isArray(data.detail)) {
+      const message = data.detail
+        .map((entry) => {
+          const field = Array.isArray(entry.loc) ? entry.loc.slice(1).join(".") : "";
+          return field ? `${field}: ${entry.msg}` : entry.msg;
+        })
+        .join(" | ");
+      throw new Error(message || "Request failed");
+    }
+
     throw new Error(data.detail || "Request failed");
   }
 
@@ -47,6 +57,10 @@ export function getMe(token) {
 
 export function getLiveTraffic(limit = 20) {
   return request(`/live-traffic?limit=${limit}`);
+}
+
+export function getAlertsHistory() {
+  return request("/live-traffic/alerts-history");
 }
 
 export async function downloadAuditReport() {
@@ -95,4 +109,22 @@ export async function downloadThreatIntelLog() {
   link.click();
   link.remove();
   window.URL.revokeObjectURL(downloadUrl);
+}
+
+export function addAnalyst(token, payload) {
+  return request("/admin/add-analyst", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getAnalystActivity(token) {
+  return request("/admin/analyst-activity", {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
 }

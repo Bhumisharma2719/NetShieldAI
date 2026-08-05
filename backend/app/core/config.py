@@ -30,6 +30,13 @@ class Settings(BaseSettings):
     google_admin_email: str = ""
     google_analyst_emails: str = ""
 
+    smtp_server: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_use_tls: bool = True
+    smtp_from_email: str = ""
+
     seed_default_users: bool = True
     default_admin_user_id: str = "admin"
     default_admin_password: str = "admin123"

@@ -80,3 +80,48 @@ async def update_user_profile(user_id: str, email: str | None = None, name: str 
     async with sessionmaker() as session:
         await session.execute(text(f"UPDATE users SET {assignments} WHERE user_id = :user_id"), updates)
         await session.commit()
+
+
+async def update_last_login_at(user_id: str) -> None:
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as session:
+        await session.execute(
+            text(
+                """
+                UPDATE users
+                SET last_login_at = :last_login_at, updated_at = :updated_at
+                WHERE user_id = :user_id
+                """
+            ),
+            {
+                "user_id": user_id,
+                "last_login_at": datetime.now(timezone.utc),
+                "updated_at": datetime.now(timezone.utc),
+            },
+        )
+        await session.commit()
+
+
+async def list_analyst_activity() -> list[dict[str, Any]]:
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as session:
+        result = await session.execute(
+            text(
+                """
+                SELECT
+                    user_id,
+                    name,
+                    email,
+                    role,
+                    provider,
+                    is_active,
+                    created_at,
+                    updated_at,
+                    last_login_at
+                FROM users
+                WHERE role = 'analyst'
+                ORDER BY last_login_at DESC NULLS LAST, created_at DESC
+                """
+            )
+        )
+        return [row_to_dict(row) for row in result.fetchall()]

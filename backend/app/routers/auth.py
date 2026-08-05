@@ -1,17 +1,17 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from google.auth.exceptions import GoogleAuthError
 from google.auth.transport import requests
 from google.oauth2 import id_token
 
+from app.core.dependencies import get_current_user
 from app.core.config import settings
-from app.core.security import create_access_token, decode_access_token, verify_password
+from app.core.security import create_access_token, verify_password
 from app.models.user import UserRole
 from app.repositories.users import find_user_by_email, find_user_by_user_id
+from app.repositories.users import update_last_login_at
 from app.schemas.auth import GoogleLoginRequest, LoginRequest, TokenResponse, UserResponse
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-bearer_scheme = HTTPBearer()
 
 
 def build_token_response(user: dict) -> TokenResponse:
@@ -38,6 +38,7 @@ async def login(payload: LoginRequest):
     if not password_hash or not verify_password(payload.password, password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user ID or password")
 
+    await update_last_login_at(user["user_id"])
     return build_token_response(user)
 
 
@@ -81,20 +82,12 @@ async def google_login(payload: GoogleLoginRequest):
     if user is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This Google email is not registered")
 
+    await update_last_login_at(user["user_id"])
     return build_token_response(user)
 
 
 @router.get("/me", response_model=UserResponse)
-async def me(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)):
-    try:
-        payload = decode_access_token(credentials.credentials)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
-
-    user = await find_user_by_user_id(payload["sub"])
-    if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User no longer exists")
-
+async def me(user: dict = Depends(get_current_user)):
     return UserResponse(
         user_id=user["user_id"],
         role=UserRole(user["role"]),

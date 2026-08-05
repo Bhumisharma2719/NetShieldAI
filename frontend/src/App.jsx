@@ -2,7 +2,17 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { GoogleLogin } from "@react-oauth/google";
 import { BarChart3, Download, LayoutDashboard, LogOut, Monitor, Pause, Play, ShieldCheck, UserCog, Volume2, VolumeX } from "lucide-react";
 
-import { downloadAuditReport, downloadThreatIntelLog, getLiveTraffic, getMe, loginWithGoogle, loginWithPassword } from "./api";
+import {
+  addAnalyst,
+  downloadAuditReport,
+  downloadThreatIntelLog,
+  getAlertsHistory,
+  getAnalystActivity,
+  getLiveTraffic,
+  getMe,
+  loginWithGoogle,
+  loginWithPassword,
+} from "./api";
 
 const STORAGE_KEY = "netshield_auth";
 
@@ -236,8 +246,8 @@ function LiveBarChart({ title, items, footnote }) {
           return (
             <div key={`${item.name}-${index}`} className="bar-row">
               <div className="bar-row-meta">
-                <strong>{item.name}</strong>
-                <em>{item.value}</em>
+                <span className="bar-row-label">{item.name}</span>
+                <span className="bar-row-value">{item.value}</span>
               </div>
               <div className="bar-track">
                 <span style={{ width }} data-slice={index} />
@@ -320,7 +330,7 @@ function LiveTrafficPanel({ records, error }) {
   );
 }
 
-function ThreatBanner({ alerts, audioMuted, onDismiss, onClear, onToggleAudio }) {
+function ThreatBanner({ alerts, audioMuted, onDismiss, onClear, onToggleAudio, onOpenHistory }) {
   const latestAlert = alerts[0];
 
   return (
@@ -331,6 +341,9 @@ function ThreatBanner({ alerts, audioMuted, onDismiss, onClear, onToggleAudio })
           <strong>{latestAlert ? "Live anomaly under watch" : "No active high-risk anomalies"}</strong>
         </div>
         <div className="alert-actions">
+          <button className="history-link" onClick={onOpenHistory} type="button">
+            Traced Alerts History
+          </button>
           <button
             className="sound-toggle-button"
             onClick={onToggleAudio}
@@ -451,7 +464,7 @@ function buildLiveSummaryMetrics(records) {
   };
 }
 
-function AnalystTrafficDashboard({ currentUser }) {
+function AnalystTrafficDashboard({ currentUser, onLogout }) {
   const [livePackets, setLivePackets] = useState([]);
   const [liveTrafficError, setLiveTrafficError] = useState("");
   const [alerts, setAlerts] = useState([]);
@@ -460,6 +473,11 @@ function AnalystTrafficDashboard({ currentUser }) {
   const [exporting, setExporting] = useState(false);
   const [activeTab, setActiveTab] = useState("overview");
   const [monitorFilter, setMonitorFilter] = useState("all");
+  const [alertsHistoryOpen, setAlertsHistoryOpen] = useState(false);
+  const [alertsHistoryLoading, setAlertsHistoryLoading] = useState(false);
+  const [alertsHistoryError, setAlertsHistoryError] = useState("");
+  const [alertsHistoryQuery, setAlertsHistoryQuery] = useState("");
+  const [alertsHistoryRecords, setAlertsHistoryRecords] = useState([]);
   const audioContextRef = useRef(null);
   const [live, setLive] = useState(true);
 
@@ -589,8 +607,8 @@ function AnalystTrafficDashboard({ currentUser }) {
     return () => window.clearInterval(timer);
   }, [alerts.length]);
 
-  const latestPackets = livePackets.slice(0, 20);
-  const overviewPreview = livePackets.slice(0, 6);
+  const latestPackets = livePackets.slice(0, 50);
+  const overviewPreview = livePackets.slice(0, 20);
   const observedPackets = livePackets.length;
   const attackFlows = livePackets.filter((record) => Number(record.risk_score || 0) >= 70).length;
   const highRiskCount = livePackets.filter((record) => getSeverityBucket(record) === "High").length;
@@ -601,6 +619,48 @@ function AnalystTrafficDashboard({ currentUser }) {
   const protocolMix = buildLiveProtocolMix(livePackets);
   const trafficTrend = buildLiveTrafficTrend(livePackets);
   const summaryMetrics = buildLiveSummaryMetrics(livePackets);
+  const fallbackAlertsHistory = useMemo(() => {
+    const sources = [
+      ...alerts.map((record) => ({
+        timestamp: record.timestamp,
+        src_ip: record.src_ip,
+        dst_ip: record.dst_ip,
+        protocol: record.protocol || record.proto,
+        risk_score: Number(record.risk_score || 0),
+        attack_type: record.attack_type || formatAttackType(record),
+      })),
+      ...livePackets
+        .filter((record) => Number(record.risk_score || 0) >= 70)
+        .map((record) => ({
+          timestamp: record.timestamp,
+          src_ip: record.src_ip,
+          dst_ip: record.dst_ip,
+          protocol: record.protocol || record.proto,
+          risk_score: Number(record.risk_score || 0),
+          attack_type: record.attack_type || formatAttackType(record),
+        })),
+    ];
+
+    const seen = new Set();
+    const deduped = [];
+
+    for (const record of sources) {
+      const key = [
+        record.timestamp || "",
+        record.src_ip || "",
+        record.dst_ip || "",
+        record.protocol || "",
+        record.attack_type || "",
+        Number(record.risk_score || 0).toFixed(1),
+      ].join("|");
+
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deduped.push(record);
+    }
+
+    return deduped.sort((left, right) => String(right.timestamp || "").localeCompare(String(left.timestamp || "")));
+  }, [alerts, livePackets]);
   const monitorRecords = monitorFilter === "anomalies" ? latestPackets.filter((record) => Number(record.risk_score || 0) >= 70) : latestPackets;
 
   async function handleExportAuditReport() {
@@ -629,6 +689,42 @@ function AnalystTrafficDashboard({ currentUser }) {
     }
   }
 
+  async function handleOpenAlertsHistory() {
+    setAlertsHistoryOpen(true);
+    setAlertsHistoryError("");
+
+    if (alertsHistoryRecords.length) {
+      return;
+    }
+
+    setAlertsHistoryLoading(true);
+    try {
+      const data = await getAlertsHistory();
+      const records = data.records || [];
+      setAlertsHistoryRecords(records.length ? records : fallbackAlertsHistory);
+    } catch (err) {
+      setAlertsHistoryError(err.message);
+    } finally {
+      setAlertsHistoryLoading(false);
+    }
+  }
+
+  const filteredAlertsHistory = alertsHistoryRecords.filter((record) => {
+    const search = alertsHistoryQuery.trim().toLowerCase();
+    if (!search) return true;
+
+    return [
+      record.timestamp,
+      record.src_ip,
+      record.dst_ip,
+      record.protocol,
+      record.attack_type,
+      record.risk_score,
+    ]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(search));
+  });
+
   const tabs = [
     { id: "overview", label: "Analyst Overview", icon: ShieldCheck },
     { id: "analytics", label: "Attack Analytics", icon: BarChart3 },
@@ -647,14 +743,15 @@ function AnalystTrafficDashboard({ currentUser }) {
           </div>
         </div>
         <div className="header-meta">
-          <div className="user-badge">
-            <span>Current user</span>
-            <strong>{currentUser?.name || currentUser?.user_id || "Analyst"}</strong>
-            <em>{String(currentUser?.role || "analyst").toUpperCase()}</em>
+          <div className="role-pill">
+            <span>{String(currentUser?.role || "analyst").toUpperCase()}</span>
           </div>
           <button className="stream-toggle" onClick={() => setLive((current) => !current)}>
             {live ? <Pause size={18} /> : <Play size={18} />}
             {live ? "Pause Live Stream" : "Resume Live Stream"}
+          </button>
+          <button className="icon-button header-logout-button" onClick={onLogout} aria-label="Logout" title="Logout">
+            <LogOut size={18} />
           </button>
         </div>
       </header>
@@ -691,9 +788,10 @@ function AnalystTrafficDashboard({ currentUser }) {
               onDismiss={(alertId) => setAlerts((currentAlerts) => currentAlerts.filter((alert) => alert.id !== alertId))}
               onClear={() => setAlerts([])}
               onToggleAudio={() => setAudioMuted((current) => !current)}
+              onOpenHistory={handleOpenAlertsHistory}
             />
 
-            <LiveTrafficPanel records={latestPackets} error={liveTrafficError} />
+            <LiveTrafficPanel records={overviewPreview} error={liveTrafficError} />
           </section>
         ) : null}
 
@@ -726,16 +824,10 @@ function AnalystTrafficDashboard({ currentUser }) {
                 <strong>Show live traffic or anomalies only</strong>
               </div>
               <div className="filter-group">
-                <button
-                  className={`filter-chip ${monitorFilter === "all" ? "active" : ""}`}
-                  onClick={() => setMonitorFilter("all")}
-                >
+                <button className={`filter-link ${monitorFilter === "all" ? "active" : ""}`} onClick={() => setMonitorFilter("all")}>
                   Show All
                 </button>
-                <button
-                  className={`filter-chip ${monitorFilter === "anomalies" ? "active" : ""}`}
-                  onClick={() => setMonitorFilter("anomalies")}
-                >
+                <button className={`filter-link ${monitorFilter === "anomalies" ? "active" : ""}`} onClick={() => setMonitorFilter("anomalies")}>
                   Show Anomalies Only
                 </button>
               </div>
@@ -811,6 +903,9 @@ function AnalystTrafficDashboard({ currentUser }) {
                     <Download size={17} />
                     Export CSV Audit Report
                   </button>
+                  <button className="history-button report-button" onClick={handleOpenAlertsHistory}>
+                    Traced Alerts History
+                  </button>
                   <button className="export-report-button report-button" onClick={handleDownloadThreatLog} disabled={exporting}>
                     <Download size={17} />
                     Download Threat Intelligence Log
@@ -842,9 +937,312 @@ function AnalystTrafficDashboard({ currentUser }) {
                 </div>
               </div>
             </div>
+            {alertsHistoryOpen ? (
+              <section className="alerts-history-panel">
+                <div className="panel-heading">
+                  <span>Security Trace Log</span>
+                  <strong>Traced Alerts History</strong>
+                </div>
+                <div className="modal-toolbar">
+                  <input
+                    className="modal-search"
+                    value={alertsHistoryQuery}
+                    onChange={(event) => setAlertsHistoryQuery(event.target.value)}
+                    placeholder="Search by IP, protocol, attack type, or risk score"
+                  />
+                  <button className="history-link close-history-link" type="button" onClick={() => setAlertsHistoryOpen(false)}>
+                    Close
+                  </button>
+                </div>
+                {alertsHistoryLoading ? <div className="modal-state">Loading traced alerts...</div> : null}
+                {alertsHistoryError ? <div className="error modal-error">{alertsHistoryError}</div> : null}
+                <div className="modal-table-wrap inline-history-wrap">
+                  <table className="modal-table">
+                    <thead>
+                      <tr>
+                        <th>Timestamp</th>
+                        <th>Source</th>
+                        <th>Destination</th>
+                        <th>Protocol</th>
+                        <th>Attack Type</th>
+                        <th>Risk</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredAlertsHistory.length ? (
+                        filteredAlertsHistory.map((record, index) => (
+                          <tr key={`${record.timestamp}-${record.src_ip}-${record.dst_ip}-${index}`}>
+                            <td>{formatLiveTimestamp(record.timestamp)}</td>
+                            <td>{record.src_ip}</td>
+                            <td>{record.dst_ip}</td>
+                            <td>{String(record.protocol || record.proto || "").toUpperCase()}</td>
+                            <td>{record.attack_type || "High Risk"}</td>
+                            <td>
+                              <span className="risk-pill high-risk">{Number(record.risk_score || 0).toFixed(1)}%</span>
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan="6">{alertsHistoryLoading ? "Loading..." : "No traced alerts match your search."}</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            ) : null}
           </section>
         ) : null}
       </div>
+    </section>
+  );
+}
+
+function AdminDashboard({ session, onLogout }) {
+  const [form, setForm] = useState({
+    name: "",
+    email: "",
+    role: "analyst",
+    password: "",
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityError, setActivityError] = useState("");
+  const [activityRecords, setActivityRecords] = useState([]);
+  const [message, setMessage] = useState("");
+  const [alertsHistoryOpen, setAlertsHistoryOpen] = useState(false);
+  const [alertsHistoryLoading, setAlertsHistoryLoading] = useState(false);
+  const [alertsHistoryError, setAlertsHistoryError] = useState("");
+  const [alertsHistoryQuery, setAlertsHistoryQuery] = useState("");
+  const [alertsHistoryRecords, setAlertsHistoryRecords] = useState([]);
+
+  async function loadActivity() {
+    setActivityLoading(true);
+    setActivityError("");
+    try {
+      const data = await getAnalystActivity(session.access_token);
+      setActivityRecords(data.records || []);
+    } catch (err) {
+      setActivityError(err.message);
+    } finally {
+      setActivityLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadActivity();
+  }, [session.access_token]);
+
+  async function handleOpenAlertsHistory() {
+    setAlertsHistoryOpen(true);
+    setAlertsHistoryError("");
+
+    if (alertsHistoryRecords.length) {
+      return;
+    }
+
+    setAlertsHistoryLoading(true);
+    try {
+      const data = await getAlertsHistory();
+      setAlertsHistoryRecords(data.records || []);
+    } catch (err) {
+      setAlertsHistoryError(err.message);
+    } finally {
+      setAlertsHistoryLoading(false);
+    }
+  }
+
+  const filteredAlertsHistory = alertsHistoryRecords.filter((record) => {
+    const search = alertsHistoryQuery.trim().toLowerCase();
+    if (!search) return true;
+
+    return [record.timestamp, record.src_ip, record.dst_ip, record.protocol, record.attack_type, record.risk_score]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(search));
+  });
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setSubmitting(true);
+    setMessage("");
+    setActivityError("");
+
+    try {
+      const payload = {
+        name: form.name.trim(),
+        email: form.email.trim(),
+        role: form.role || "analyst",
+        password: form.password,
+      };
+      await addAnalyst(session.access_token, payload);
+      setMessage(`Analyst ${payload.name} has been onboarded successfully.`);
+      setForm({ name: "", email: "", role: "analyst", password: "" });
+      await loadActivity();
+    } catch (err) {
+      setActivityError(err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <section className="workspace-shell admin-workspace">
+      <header className="dashboard-header">
+        <div className="header-brand">
+          <ShieldCheck size={24} />
+          <div>
+            <span>NetShield AI</span>
+            <strong>Admin Dashboard</strong>
+          </div>
+        </div>
+        <div className="header-actions">
+          <div className="role-pill">
+            <span>ADMIN</span>
+          </div>
+          <button className="history-button" type="button" onClick={handleOpenAlertsHistory}>
+            Traced Alerts History
+          </button>
+          <button className="icon-button" onClick={onLogout} aria-label="Logout" title="Logout">
+            <LogOut size={20} />
+          </button>
+        </div>
+      </header>
+
+      <div className="admin-grid">
+        <section className="admin-card">
+          <div className="panel-heading">
+            <span>Add Analyst</span>
+            <strong>Onboard new security staff</strong>
+          </div>
+          <form className="admin-form" onSubmit={handleSubmit}>
+            <label>
+              Name
+              <input value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} required />
+            </label>
+            <label>
+              Email
+              <input value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} type="email" required />
+            </label>
+            <label>
+              Role
+              <select value={form.role} onChange={(event) => setForm((current) => ({ ...current, role: event.target.value }))}>
+                <option value="analyst">Analyst</option>
+              </select>
+            </label>
+            <label>
+              Password
+              <input
+                value={form.password}
+                onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
+                type="password"
+                minLength={6}
+                required
+              />
+            </label>
+            {message ? <p className="success">{message}</p> : null}
+            {activityError ? <p className="error">{activityError}</p> : null}
+            <button className="primary-button" disabled={submitting}>
+              {submitting ? "Creating Analyst..." : "Add New Analyst"}
+            </button>
+          </form>
+        </section>
+
+        <section className="admin-card">
+          <div className="panel-heading">
+            <span>Analyst Activity Logs</span>
+            <strong>Latest login timestamps</strong>
+          </div>
+          <div className="live-feed-table-wrap admin-table-wrap">
+            <table className="live-feed-table admin-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>User ID</th>
+                  <th>Last Login</th>
+                </tr>
+              </thead>
+              <tbody>
+                {activityLoading ? (
+                  <tr>
+                    <td colSpan="4">Loading analyst activity...</td>
+                  </tr>
+                ) : activityRecords.length ? (
+                  activityRecords.map((record) => (
+                    <tr key={record.user_id}>
+                      <td>{record.name || "--"}</td>
+                      <td>{record.email || "--"}</td>
+                      <td>{record.user_id}</td>
+                      <td>{record.last_login_at ? formatLiveTimestamp(record.last_login_at) : "Never"}</td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan="4">No analyst activity available.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      {alertsHistoryOpen ? (
+        <section className="alerts-history-panel">
+          <div className="panel-heading">
+            <span>Security Trace Log</span>
+            <strong>Traced Alerts History</strong>
+          </div>
+          <div className="modal-toolbar">
+            <input
+              className="modal-search"
+              value={alertsHistoryQuery}
+              onChange={(event) => setAlertsHistoryQuery(event.target.value)}
+              placeholder="Search by IP, protocol, attack type, or risk score"
+            />
+            <button className="history-link close-history-link" type="button" onClick={() => setAlertsHistoryOpen(false)}>
+              Close
+            </button>
+          </div>
+          {alertsHistoryLoading ? <div className="modal-state">Loading traced alerts...</div> : null}
+          {alertsHistoryError ? <div className="error modal-error">{alertsHistoryError}</div> : null}
+          <div className="modal-table-wrap inline-history-wrap">
+            <table className="modal-table">
+              <thead>
+                <tr>
+                  <th>Timestamp</th>
+                  <th>Source</th>
+                  <th>Destination</th>
+                  <th>Protocol</th>
+                  <th>Attack Type</th>
+                  <th>Risk</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredAlertsHistory.length ? (
+                  filteredAlertsHistory.map((record, index) => (
+                    <tr key={`${record.timestamp}-${record.src_ip}-${record.dst_ip}-${index}`}>
+                      <td>{formatLiveTimestamp(record.timestamp)}</td>
+                      <td>{record.src_ip}</td>
+                      <td>{record.dst_ip}</td>
+                      <td>{String(record.protocol || record.proto || "").toUpperCase()}</td>
+                      <td>{record.attack_type || "High Risk"}</td>
+                      <td>
+                        <span className="risk-pill high-risk">{Number(record.risk_score || 0).toFixed(1)}%</span>
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan="6">{alertsHistoryLoading ? "Loading..." : "No traced alerts available yet."}</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
     </section>
   );
 }
@@ -854,33 +1252,7 @@ function Dashboard({ session, onLogout }) {
 
   return (
     <main className="dashboard-shell">
-      {isAdmin ? (
-        <section className="admin-shell">
-          <nav className="topbar">
-            <div className="brand-mark">
-              <ShieldCheck size={24} />
-              <span>NetShield AI</span>
-            </div>
-            <div className="header-actions">
-              <div className="user-badge compact">
-                <span>Current user</span>
-                <strong>{session.user.name || session.user.user_id}</strong>
-                <em>ADMIN</em>
-              </div>
-              <button className="icon-button" onClick={onLogout} aria-label="Logout" title="Logout">
-                <LogOut size={20} />
-              </button>
-            </div>
-          </nav>
-          <section className="stats-grid">
-            <Stat label="Managed users" value="2" />
-            <Stat label="Active roles" value="Admin + Analyst" />
-            <Stat label="Auth status" value="JWT secured" />
-          </section>
-        </section>
-      ) : (
-        <AnalystTrafficDashboard currentUser={session.user} />
-      )}
+      {isAdmin ? <AdminDashboard session={session} onLogout={onLogout} /> : <AnalystTrafficDashboard currentUser={session.user} onLogout={onLogout} />}
     </main>
   );
 }
