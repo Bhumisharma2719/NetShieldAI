@@ -124,19 +124,22 @@ function LiveLineChart({ points }) {
   );
 }
 
-function LiveDonutChart({ title, items }) {
+function LiveDonutChart({ title, items, expanded = false }) {
   const safeItems = items.length ? items : [{ name: "No live data", value: 1 }];
   const total = safeItems.reduce((sum, item) => sum + item.value, 0) || 1;
   let cumulative = 0;
+  const chartStyle = expanded ? { minHeight: "260px", width: "100%" } : undefined;
+  const wrapStyle = expanded ? { height: "220px", width: "100%" } : undefined;
+  const svgStyle = expanded ? { width: "220px", height: "220px" } : undefined;
 
   return (
-    <div className="chart-panel">
+    <div className="chart-panel threat-severity-card" style={chartStyle}>
       <div className="panel-heading">
         <span>{title}</span>
         <strong>{items.length ? `${total.toLocaleString()} packets` : "Waiting"}</strong>
       </div>
-      <div className="donut-wrap">
-        <svg viewBox="0 0 42 42" className="donut-chart" role="img" aria-label={`${title} live donut chart`}>
+      <div className="donut-wrap" style={wrapStyle}>
+        <svg viewBox="0 0 42 42" className="donut-chart" role="img" aria-label={`${title} live donut chart`} style={svgStyle}>
           <circle cx="21" cy="21" r="15.915" />
           {safeItems.slice(0, 5).map((item, index) => {
             const percent = (item.value / total) * 100;
@@ -285,7 +288,7 @@ function LiveTrafficPanel({ records, error }) {
             <em>{anomalyCount} anomalies</em>
           </div>
         </div>
-        <div className="live-feed-table-wrap">
+        <div className="live-feed-table-wrap" style={{ height: "350px", maxHeight: "350px", overflowY: "auto" }}>
           <table className="live-feed-table">
             <thead>
             <tr>
@@ -810,7 +813,7 @@ function AnalystTrafficDashboard({ currentUser, onLogout }) {
             </div>
 
             <div className="analytics-grid analytics-secondary">
-              <LiveDonutChart title="Threat Severity Split" items={severityMix} />
+              <LiveDonutChart title="Threat Severity Split" items={severityMix} expanded />
               <LiveBarChart title="Attack Flow Density" items={buildLiveSeverityBars(livePackets)} footnote={`Average risk ${summaryMetrics.averageRisk}%`} />
             </div>
           </section>
@@ -1075,6 +1078,7 @@ function AdminDashboard({ session, onLogout }) {
         role: form.role || "analyst",
         password: form.password,
       };
+      console.log("Sending payload:", payload);
       await addAnalyst(session.access_token, payload);
       setMessage(`Analyst ${payload.name} has been onboarded successfully.`);
       setForm({ name: "", email: "", role: "analyst", password: "" });

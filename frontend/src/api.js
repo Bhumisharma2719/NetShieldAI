@@ -112,13 +112,47 @@ export async function downloadThreatIntelLog() {
 }
 
 export function addAnalyst(token, payload) {
-  return request("/admin/add-analyst", {
+  console.log("Sending payload:", payload);
+
+  return fetch(`${API_URL}/admin/add-analyst`, {
     method: "POST",
     headers: {
+      "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify(payload),
-  });
+  })
+    .then(async (response) => {
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        if (response.status === 422) {
+          console.log("422 Error Detail:", data.detail);
+          alert(JSON.stringify(data.detail));
+        }
+
+        if (Array.isArray(data.detail)) {
+          const message = data.detail
+            .map((entry) => {
+              const field = Array.isArray(entry.loc) ? entry.loc.slice(1).join(".") : "";
+              return field ? `${field}: ${entry.msg}` : entry.msg;
+            })
+            .join(" | ");
+          throw new Error(message || "Request failed");
+        }
+
+        throw new Error(data.detail || "Request failed");
+      }
+
+      return data;
+    })
+    .catch((error) => {
+      if (error instanceof Error) {
+        throw error;
+      }
+
+      throw new Error("Request failed");
+    });
 }
 
 export function getAnalystActivity(token) {

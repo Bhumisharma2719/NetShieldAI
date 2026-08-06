@@ -2147,15 +2147,52 @@ input:focus {
 }
 
 .analytics-secondary .chart-panel:first-child {
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: flex-start !important;
   min-height: 280px !important;
+  overflow: hidden !important;
+  padding: 1.25rem !important;
 }
 
 .analytics-secondary .chart-panel:first-child .pie-wrap {
-  min-height: 280px !important;
+  align-items: center !important;
+  display: flex !important;
+  gap: 1rem !important;
+  justify-content: space-between !important;
+  min-height: 220px !important;
+  width: 100% !important;
 }
 
 .analytics-secondary .chart-panel:first-child .pie-chart {
-  min-height: 280px !important;
-  transform: scale(1.25) !important;
-  transform-origin: center center !important;
+  height: 220px !important;
+  min-height: 220px !important;
+  transform: none !important;
+  width: 220px !important;
+}
+
+.analytics-secondary .chart-panel:first-child .legend-list {
+  align-self: center !important;
+  min-width: 0 !important;
+}
+
+.threat-severity-card .panel-heading {
+  margin-bottom: 12px;
+}
+
+.threat-severity-card .donut-wrap {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.threat-severity-card .pie-chart {
+  flex: 0 0 auto;
+}
+
+.threat-severity-card .legend-list {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
 }
