@@ -25,23 +25,24 @@ services:
     env_file:
       - backend/.env
     environment:
-      POSTGRES_HOST: localhost
+      POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       BACKEND_CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
       SNIFFER_IFACE: ${SNIFFER_IFACE:-}
     privileged: true
-    network_mode: host
     cap_add:
       - NET_ADMIN
       - NET_RAW
+    ports:
+      - "8000:8000"
     command:
       - sh
       - -c
       - |
         if [ -n "$$SNIFFER_IFACE" ]; then
-          python ml_core/live_sniffer.py --iface "$$SNIFFER_IFACE" --interval 2.5 --top 12 &
+          python ml_core/live_sniffer.py --iface "$$SNIFFER_IFACE" --interval 2.5 --top 12 >/dev/null 2>&1 &
         else
-          python ml_core/live_sniffer.py --interval 2.5 --top 12 &
+          python ml_core/live_sniffer.py --interval 2.5 --top 12 >/dev/null 2>&1 &
         fi
         exec uvicorn app.main:app --host 0.0.0.0 --port 8000
     depends_on:
