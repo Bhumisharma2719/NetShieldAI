@@ -162,3 +162,12 @@ export function getAnalystActivity(token) {
     },
   });
 }
+
+export function deleteAnalyst(token, analystId) {
+  return request(`/admin/delete-analyst/${encodeURIComponent(analystId)}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+}

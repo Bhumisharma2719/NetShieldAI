@@ -102,6 +102,44 @@ async def update_last_login_at(user_id: str) -> None:
         await session.commit()
 
 
+async def deactivate_user(user_id: str) -> bool:
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as session:
+        result = await session.execute(
+            text(
+                """
+                UPDATE users
+                SET is_active = FALSE, updated_at = :updated_at
+                WHERE user_id = :user_id AND role = 'analyst'
+                RETURNING user_id
+                """
+            ),
+            {
+                "user_id": user_id,
+                "updated_at": datetime.now(timezone.utc),
+            },
+        )
+        await session.commit()
+        return result.first() is not None
+
+
+async def delete_user(user_id: str) -> bool:
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as session:
+        result = await session.execute(
+            text(
+                """
+                DELETE FROM users
+                WHERE user_id = :user_id AND role = 'analyst'
+                RETURNING user_id
+                """
+            ),
+            {"user_id": user_id},
+        )
+        await session.commit()
+        return result.first() is not None
+
+
 async def list_analyst_activity() -> list[dict[str, Any]]:
     sessionmaker = get_sessionmaker()
     async with sessionmaker() as session:
@@ -119,7 +157,7 @@ async def list_analyst_activity() -> list[dict[str, Any]]:
                     updated_at,
                     last_login_at
                 FROM users
-                WHERE role = 'analyst'
+                WHERE role = 'analyst' AND is_active = TRUE
                 ORDER BY last_login_at DESC NULLS LAST, created_at DESC
                 """
             )

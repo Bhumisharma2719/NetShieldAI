@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.core.dependencies import require_admin
 from app.core.security import hash_password
 from app.models.user import UserRole
-from app.repositories.users import create_user, find_user_by_email, find_user_by_user_id, list_analyst_activity
+from app.repositories.users import create_user, delete_user, find_user_by_email, find_user_by_user_id, list_analyst_activity
 from app.schemas.admin import AddAnalystResponse, AnalystCreate
 from app.services.email_notifications import send_onboarding_email
 
@@ -69,3 +69,16 @@ async def add_analyst(
 @router.get("/analyst-activity")
 async def analyst_activity(_: dict = Depends(require_admin)):
     return {"records": await list_analyst_activity()}
+
+
+@router.delete("/delete-analyst/{analyst_id}")
+async def delete_analyst(analyst_id: str, _: dict = Depends(require_admin)):
+    analyst = await find_user_by_user_id(analyst_id)
+    if not analyst or analyst.get("role") != UserRole.analyst.value:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analyst not found")
+
+    deleted = await delete_user(analyst_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analyst not found")
+
+    return {"message": "Analyst deleted successfully", "user_id": analyst_id}

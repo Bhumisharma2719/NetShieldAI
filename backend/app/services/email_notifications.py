@@ -3,18 +3,25 @@ from __future__ import annotations
 import os
 import smtplib
 import ssl
+from pathlib import Path
 from email.mime.text import MIMEText
+
+from dotenv import load_dotenv
 
 from app.core.config import settings
 
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+
+SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USERNAME = os.getenv("SMTP_USERNAME", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "").replace(" ", "")
+SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL", SMTP_USERNAME)
+SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", str(settings.smtp_use_tls)).strip().lower() in {"1", "true", "yes", "on"}
+
 
 def send_onboarding_email(to_email: str, password: str, name: str | None = None, user_id: str | None = None) -> None:
-    smtp_password = (os.getenv("SMTP_PASSWORD") or settings.smtp_password or "").replace(" ", "")
-    smtp_server = os.getenv("SMTP_SERVER") or settings.smtp_server
-    smtp_username = os.getenv("SMTP_USERNAME") or settings.smtp_username
-    smtp_from_email = os.getenv("SMTP_FROM_EMAIL") or settings.smtp_from_email or smtp_username
-
-    if not smtp_server or not smtp_username or not smtp_password:
+    if not all([SMTP_SERVER, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD]):
         print("[EMAIL ERROR] Failed to send mail: SMTP settings are incomplete")
         return
 
@@ -35,21 +42,21 @@ def send_onboarding_email(to_email: str, password: str, name: str | None = None,
 
     message = MIMEText(body, "plain", "utf-8")
     message["Subject"] = subject
-    message["From"] = smtp_from_email
+    message["From"] = SMTP_FROM_EMAIL or SMTP_USERNAME
     message["To"] = to_email
 
     try:
-        if settings.smtp_use_tls:
-            with smtplib.SMTP(smtp_server, settings.smtp_port, timeout=15) as server:
+        if SMTP_USE_TLS:
+            with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=15) as server:
                 server.ehlo()
                 server.starttls(context=ssl.create_default_context())
                 server.ehlo()
-                server.login(smtp_username, smtp_password)
-                server.sendmail(smtp_from_email, [to_email], message.as_string())
+                server.login(SMTP_USERNAME, SMTP_PASSWORD)
+                server.sendmail(SMTP_FROM_EMAIL or SMTP_USERNAME, [to_email], message.as_string())
         else:
-            with smtplib.SMTP_SSL(smtp_server, settings.smtp_port, timeout=15) as server:
-                server.login(smtp_username, smtp_password)
-                server.sendmail(smtp_from_email, [to_email], message.as_string())
+            with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT, timeout=15) as server:
+                server.login(SMTP_USERNAME, SMTP_PASSWORD)
+                server.sendmail(SMTP_FROM_EMAIL or SMTP_USERNAME, [to_email], message.as_string())
 
         print(f"[EMAIL SUCCESS] Mail sent to {to_email}")
     except Exception as e:

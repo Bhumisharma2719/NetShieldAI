@@ -127,6 +127,34 @@ input:focus {
   padding: 0 18px;
 }
 
+.danger-button {
+  align-items: center;
+  background: #fee2e2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  color: #b91c1c;
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-weight: 800;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 12px;
+  transition: background-color 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+.danger-button:hover:not(:disabled) {
+  background: #fecaca;
+  border-color: #f87171;
+  transform: translateY(-1px);
+}
+
+.danger-button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+  transform: none;
+}
+
 .primary-button:disabled,
 .google-placeholder:disabled {
   cursor: not-allowed;

@@ -3,6 +3,7 @@ import { GoogleLogin } from "@react-oauth/google";
 import { BarChart3, Download, LayoutDashboard, LogOut, Monitor, Pause, Play, ShieldCheck, UserCog, Volume2, VolumeX } from "lucide-react";
 
 import {
+  deleteAnalyst,
   addAnalyst,
   downloadAuditReport,
   downloadThreatIntelLog,
@@ -1014,6 +1015,7 @@ function AdminDashboard({ session, onLogout }) {
   const [activityError, setActivityError] = useState("");
   const [activityRecords, setActivityRecords] = useState([]);
   const [message, setMessage] = useState("");
+  const [deletingAnalystId, setDeletingAnalystId] = useState("");
   const [alertsHistoryOpen, setAlertsHistoryOpen] = useState(false);
   const [alertsHistoryLoading, setAlertsHistoryLoading] = useState(false);
   const [alertsHistoryError, setAlertsHistoryError] = useState("");
@@ -1087,6 +1089,24 @@ function AdminDashboard({ session, onLogout }) {
       setActivityError(err.message);
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleDeleteAnalyst(analystId, analystName) {
+    const confirmed = window.confirm(`Delete analyst ${analystName || analystId}? This will disable the account immediately.`);
+    if (!confirmed) return;
+
+    setDeletingAnalystId(analystId);
+    setActivityError("");
+
+    try {
+      await deleteAnalyst(session.access_token, analystId);
+      await loadActivity();
+      setMessage(`Analyst ${analystName || analystId} has been removed.`);
+    } catch (err) {
+      setActivityError(err.message);
+    } finally {
+      setDeletingAnalystId("");
     }
   }
 
@@ -1165,12 +1185,13 @@ function AdminDashboard({ session, onLogout }) {
                   <th>Email</th>
                   <th>User ID</th>
                   <th>Last Login</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
                 {activityLoading ? (
                   <tr>
-                    <td colSpan="4">Loading analyst activity...</td>
+                    <td colSpan="5">Loading analyst activity...</td>
                   </tr>
                 ) : activityRecords.length ? (
                   activityRecords.map((record) => (
@@ -1179,11 +1200,21 @@ function AdminDashboard({ session, onLogout }) {
                       <td>{record.email || "--"}</td>
                       <td>{record.user_id}</td>
                       <td>{record.last_login_at ? formatLiveTimestamp(record.last_login_at) : "Never"}</td>
+                      <td>
+                        <button
+                          className="danger-button"
+                          type="button"
+                          onClick={() => handleDeleteAnalyst(record.user_id, record.name)}
+                          disabled={deletingAnalystId === record.user_id}
+                        >
+                          {deletingAnalystId === record.user_id ? "Deleting..." : "Delete"}
+                        </button>
+                      </td>
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan="4">No analyst activity available.</td>
+                    <td colSpan="5">No analyst activity available.</td>
                   </tr>
                 )}
               </tbody>

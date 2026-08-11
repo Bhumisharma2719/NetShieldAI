@@ -17,6 +17,8 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(b
     user = await find_user_by_user_id(payload["sub"])
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User no longer exists")
+    if not user.get("is_active", True):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User account is inactive")
 
     return user
 
