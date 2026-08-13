@@ -5,7 +5,7 @@ from io import StringIO
 from fastapi import APIRouter, Query
 from fastapi.responses import Response
 
-from app.services.live_traffic_store import get_all_live_logs, get_alerts_history, get_latest_live_logs
+from app.services.live_traffic_store import get_all_live_logs, get_alerts_history, get_latest_live_logs, get_live_capture_stats
 
 router = APIRouter(tags=["live-traffic"])
 
@@ -18,15 +18,20 @@ async def live_traffic(limit: int = Query(default=20, ge=1, le=100)):
         return {
             "records": [],
             "count": 0,
+            "stream_active": False,
             "error": f"Unable to read live traffic store: {exc}",
         }
 
     high_risk_count = sum(1 for record in records if record.get("risk_label") == "HIGH-RISK")
     anomaly_count = sum(1 for record in records if record.get("prediction") == 1)
+    capture_stats = get_live_capture_stats()
 
     return {
         "records": records,
         "count": len(records),
+        "stream_active": bool(records),
+        "total_captured_packets": int(capture_stats.get("total_captured_packets", 0) or 0),
+        "last_capture_at": capture_stats.get("last_capture_at"),
         "high_risk_count": high_risk_count,
         "anomaly_count": anomaly_count,
     }

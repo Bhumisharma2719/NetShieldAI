@@ -90,6 +90,18 @@ function getSeverityClass(record) {
   return getSeverityBucket(record).toLowerCase();
 }
 
+function getRiskPillClass(record) {
+  const label = String(record.risk_label || "").trim().toUpperCase();
+  if (label === "HIGH-RISK") return "high-risk";
+  if (label === "SUSPICIOUS") return "medium-risk";
+  if (label === "SAFE") return "low-risk";
+
+  const score = Number(record.risk_score || 0);
+  if (score >= 70) return "high-risk";
+  if (score >= 40) return "medium-risk";
+  return "low-risk";
+}
+
 function LiveLineChart({ points }) {
   const width = 720;
   const height = 178;
@@ -315,7 +327,7 @@ function LiveTrafficPanel({ records, error }) {
                     <td>{record.packets}</td>
                     <td>{Number(record.bytes || 0).toLocaleString()}</td>
                     <td>
-                      <span className={`risk-pill ${String(record.risk_label || "LOW-RISK").toLowerCase()}`}>
+                      <span className={`risk-pill ${getRiskPillClass(record)}`}>
                         {Number(record.risk_score || 0).toFixed(1)}%
                       </span>
                     </td>
@@ -323,7 +335,7 @@ function LiveTrafficPanel({ records, error }) {
                 ))
               ) : (
                 <tr>
-                  <td colSpan="8">Start live_sniffer.py to stream socket detections here.</td>
+                  <td colSpan="8">Waiting for live packets from active adapters...</td>
                 </tr>
               )}
             </tbody>
@@ -470,6 +482,7 @@ function buildLiveSummaryMetrics(records) {
 
 function AnalystTrafficDashboard({ currentUser, onLogout }) {
   const [livePackets, setLivePackets] = useState([]);
+  const [captureStats, setCaptureStats] = useState({ total_captured_packets: 0, last_capture_at: null });
   const [liveTrafficError, setLiveTrafficError] = useState("");
   const [alerts, setAlerts] = useState([]);
   const [seenAlertIds, setSeenAlertIds] = useState(() => new Set());
@@ -551,8 +564,12 @@ function AnalystTrafficDashboard({ currentUser, onLogout }) {
         const data = await getLiveTraffic(100);
         if (!active) return;
         const nextRecords = data.records || [];
-        setLivePackets(nextRecords);
         setLiveTrafficError(data.error || "");
+        setCaptureStats({
+          total_captured_packets: Number(data.total_captured_packets || 0),
+          last_capture_at: data.last_capture_at || null,
+        });
+        setLivePackets(nextRecords);
         setSeenAlertIds((currentSeenIds) => {
           const nextSeenIds = new Set(currentSeenIds);
           const newAlerts = nextRecords
@@ -613,7 +630,7 @@ function AnalystTrafficDashboard({ currentUser, onLogout }) {
 
   const latestPackets = livePackets.slice(0, 50);
   const overviewPreview = livePackets.slice(0, 20);
-  const observedPackets = livePackets.length;
+  const observedPackets = Number(captureStats.total_captured_packets || livePackets.length || 0);
   const attackFlows = livePackets.filter((record) => Number(record.risk_score || 0) >= 70).length;
   const highRiskCount = livePackets.filter((record) => getSeverityBucket(record) === "High").length;
   const mediumRiskCount = livePackets.filter((record) => getSeverityBucket(record) === "Medium").length;
@@ -781,7 +798,7 @@ function AnalystTrafficDashboard({ currentUser, onLogout }) {
         {activeTab === "overview" ? (
           <section className="tab-panel tab-overview">
             <section className="stats-grid overview-kpis">
-              <Stat label="Observed packets" value={summaryMetrics.totalPackets.toLocaleString()} />
+              <Stat label="Observed packets" value={observedPackets.toLocaleString()} />
               <Stat label="Attack flows" value={attackFlows.toLocaleString()} />
               <Stat label="Risk levels" value={`H ${highRiskCount} / M ${mediumRiskCount} / L ${lowRiskCount}`} />
             </section>
@@ -871,7 +888,7 @@ function AnalystTrafficDashboard({ currentUser, onLogout }) {
                           <td>{record.packets}</td>
                           <td>{Number(record.bytes || 0).toLocaleString()}</td>
                           <td>
-                            <span className={`risk-pill ${String(record.risk_label || "LOW-RISK").toLowerCase()}`}>
+                            <span className={`risk-pill ${getRiskPillClass(record)}`}>
                               {Number(record.risk_score || 0).toFixed(1)}%
                             </span>
                           </td>
@@ -892,7 +909,7 @@ function AnalystTrafficDashboard({ currentUser, onLogout }) {
         {activeTab === "reports" ? (
           <section className="tab-panel">
             <section className="stats-grid reports-grid">
-              <Stat label="Observed packets" value={summaryMetrics.totalPackets.toLocaleString()} />
+              <Stat label="Observed packets" value={observedPackets.toLocaleString()} />
               <Stat label="Unique sources" value={summaryMetrics.uniqueSources.toLocaleString()} />
               <Stat label="Unique destinations" value={summaryMetrics.uniqueDestinations.toLocaleString()} />
             </section>

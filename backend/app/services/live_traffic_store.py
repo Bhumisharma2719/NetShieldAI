@@ -3,14 +3,18 @@ from __future__ import annotations
 import json
 import os
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 LIVE_TRAFFIC_PATH = BACKEND_DIR / "ml_core" / "live_traffic.json"
 ALERTS_HISTORY_PATH = BACKEND_DIR / "ml_core" / "alerts_history.json"
+LIVE_CAPTURE_STATS_PATH = BACKEND_DIR / "ml_core" / "live_capture_stats.json"
 MAX_LIVE_RECORDS = 500
 MAX_ALERT_HISTORY = 2000
+LIVE_RECORD_STALE_SECONDS = max(1, int(os.getenv("LIVE_TRAFFIC_STALE_SECONDS", "10")))
+LIVE_CAPTURE_IDLE_SECONDS = max(1, int(os.getenv("LIVE_CAPTURE_IDLE_SECONDS", "2")))
 
 _write_lock = threading.RLock()
 
@@ -52,6 +56,7 @@ def normalize_live_record(record: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(record)
     normalized["protocol"] = normalized.get("protocol") or normalized.get("proto")
     normalized["attack_type"] = normalized.get("attack_type") or classify_attack_type(normalized)
+    normalized["capture_source"] = normalized.get("capture_source") or "real-live-sniffer"
     return normalized
 
 
@@ -86,6 +91,11 @@ def append_live_log(record: dict[str, Any], max_records: int = MAX_LIVE_RECORDS)
 
         os.replace(temp_path, LIVE_TRAFFIC_PATH)
 
+        stats = get_live_capture_stats()
+        stats["total_captured_packets"] = int(stats.get("total_captured_packets", 0) or 0) + 1
+        stats["last_capture_at"] = normalized.get("timestamp")
+        _write_live_capture_stats(stats)
+
         try:
             risk_score = float(normalized.get("risk_score", 0) or 0)
         except (TypeError, ValueError):
@@ -104,14 +114,146 @@ def append_live_log(record: dict[str, Any], max_records: int = MAX_LIVE_RECORDS)
             )
 
 
-def get_latest_live_logs(limit: int = 20) -> list[dict[str, Any]]:
+def clear_live_traffic_store() -> None:
+    LIVE_TRAFFIC_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    with _write_lock:
+        temp_path = LIVE_TRAFFIC_PATH.with_suffix(".tmp")
+        with temp_path.open("w", encoding="utf-8") as file:
+            json.dump([], file, ensure_ascii=False, indent=2)
+
+        os.replace(temp_path, LIVE_TRAFFIC_PATH)
+        _write_live_capture_stats({"total_captured_packets": 0, "last_capture_at": None})
+
+
+def clear_alert_history_store() -> None:
+    ALERTS_HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    with _write_lock:
+        temp_path = ALERTS_HISTORY_PATH.with_suffix(".tmp")
+        with temp_path.open("w", encoding="utf-8") as file:
+            json.dump([], file, ensure_ascii=False, indent=2)
+
+        os.replace(temp_path, ALERTS_HISTORY_PATH)
+
+
+def clear_live_capture_storage() -> None:
+    clear_live_traffic_store()
+    clear_alert_history_store()
+
+
+def _parse_timestamp(value: Any) -> datetime | None:
+    if not value:
+        return None
+
+    if isinstance(value, datetime):
+        timestamp = value
+    else:
+        raw_value = str(value).strip()
+        if not raw_value:
+            return None
+        raw_value = raw_value.replace("Z", "+00:00")
+        try:
+            timestamp = datetime.fromisoformat(raw_value)
+        except ValueError:
+            return None
+
+    if timestamp.tzinfo is None:
+        return timestamp.replace(tzinfo=timezone.utc)
+
+    return timestamp.astimezone(timezone.utc)
+
+
+def _filter_fresh_records(records: list[dict[str, Any]], max_age_seconds: int) -> list[dict[str, Any]]:
+    if max_age_seconds <= 0:
+        return records
+
+    now = datetime.now(timezone.utc)
+    fresh_records: list[dict[str, Any]] = []
+
+    for record in records:
+        timestamp = _parse_timestamp(record.get("timestamp"))
+        if timestamp is None:
+            continue
+
+        if (now - timestamp).total_seconds() <= max_age_seconds:
+            fresh_records.append(record)
+
+    return fresh_records
+
+
+def _capture_is_active() -> bool:
+    stats = get_live_capture_stats()
+    last_capture_at = stats.get("last_capture_at")
+    timestamp = _parse_timestamp(last_capture_at)
+    if timestamp is None:
+        return False
+
+    now = datetime.now(timezone.utc)
+    return (now - timestamp).total_seconds() <= LIVE_CAPTURE_IDLE_SECONDS
+
+
+def get_latest_live_logs(limit: int = 20, max_age_seconds: int | None = LIVE_RECORD_STALE_SECONDS) -> list[dict[str, Any]]:
+    if not _capture_is_active():
+        return []
+
     limit = max(1, min(limit, MAX_LIVE_RECORDS))
     records = _read_records_unlocked()
+    if max_age_seconds is not None:
+        records = _filter_fresh_records(records, max_age_seconds)
     return list(reversed(records[-limit:]))
 
 
-def get_all_live_logs() -> list[dict[str, Any]]:
-    return _read_records_unlocked()
+def get_all_live_logs(max_age_seconds: int | None = None) -> list[dict[str, Any]]:
+    if not _capture_is_active():
+        return []
+
+    records = _read_records_unlocked()
+    if max_age_seconds is not None:
+        records = _filter_fresh_records(records, max_age_seconds)
+    return records
+
+
+def _read_live_capture_stats_unlocked() -> dict[str, Any]:
+    if not LIVE_CAPTURE_STATS_PATH.exists():
+        return {"total_captured_packets": 0, "last_capture_at": None}
+
+    try:
+        with LIVE_CAPTURE_STATS_PATH.open("r", encoding="utf-8") as file:
+            data = json.load(file)
+    except (json.JSONDecodeError, OSError):
+        return {"total_captured_packets": 0, "last_capture_at": None}
+
+    if not isinstance(data, dict):
+        return {"total_captured_packets": 0, "last_capture_at": None}
+
+    return {
+        "total_captured_packets": int(data.get("total_captured_packets", 0) or 0),
+        "last_capture_at": data.get("last_capture_at"),
+    }
+
+
+def _write_live_capture_stats(stats: dict[str, Any]) -> None:
+    LIVE_CAPTURE_STATS_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    temp_path = LIVE_CAPTURE_STATS_PATH.with_suffix(".tmp")
+    with temp_path.open("w", encoding="utf-8") as file:
+        json.dump(
+            {
+                "total_captured_packets": int(stats.get("total_captured_packets", 0) or 0),
+                "last_capture_at": stats.get("last_capture_at"),
+            },
+            file,
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    os.replace(temp_path, LIVE_CAPTURE_STATS_PATH)
+
+
+def get_live_capture_stats() -> dict[str, Any]:
+    with _write_lock:
+        return _read_live_capture_stats_unlocked()
 
 
 def _read_alert_history_unlocked() -> list[dict[str, Any]]:

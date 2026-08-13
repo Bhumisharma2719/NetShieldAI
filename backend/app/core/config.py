@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     google_client_id: str = ""
     google_admin_email: str = ""
     google_analyst_emails: str = ""
+    sniffer_iface: str = ""
 
     smtp_server: str = ""
     smtp_port: int = 587

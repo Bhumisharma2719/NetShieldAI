@@ -14,6 +14,12 @@ SCAPY_CONFIG_HOME = Path(__file__).resolve().parent / ".scapy_config"
 SCAPY_CONFIG_HOME.mkdir(exist_ok=True)
 os.environ.setdefault("XDG_CONFIG_HOME", str(SCAPY_CONFIG_HOME))
 
+if os.getenv("NETSHIELD_ALLOW_SYNTHETIC_TRAFFIC", "0") != "1":
+    raise SystemExit(
+        "Synthetic traffic generation is disabled by default. "
+        "Set NETSHIELD_ALLOW_SYNTHETIC_TRAFFIC=1 only in a local lab if you intentionally want mock packets."
+    )
+
 from scapy.all import IP, TCP, UDP, RandShort, send
 
 if hasattr(sys.stdout, "reconfigure"):
