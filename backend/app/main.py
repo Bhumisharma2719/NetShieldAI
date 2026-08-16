@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,12 +32,24 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
 
+if settings.environment.lower() in {"production", "render", "staging"}:
+    cors_kwargs = {
+        "allow_origin_regex": r"https?://.*",
+        "allow_credentials": False,
+        "allow_methods": ["*"],
+        "allow_headers": ["*"],
+    }
+else:
+    cors_kwargs = {
+        "allow_origins": settings.cors_origins,
+        "allow_credentials": False,
+        "allow_methods": ["*"],
+        "allow_headers": ["*"],
+    }
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    **cors_kwargs,
 )
 
 app.include_router(auth.router, prefix=settings.api_prefix)
@@ -48,7 +61,7 @@ app.include_router(admin.router, prefix=settings.api_prefix)
 
 @app.get("/")
 async def root():
-    return {"message": "NetShield AI backend is running"}
+    return {"message": "NetShield AI backend is running", "port": int(os.getenv("PORT", settings.port))}
 
 
 @app.get(f"{settings.api_prefix}/health")

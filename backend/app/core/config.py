@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     app_name: str = "NetShield AI API"
     environment: str = "development"
     api_prefix: str = "/api"
+    port: int = 8000
 
     database_url: str = ""
     postgres_host: str = "localhost"

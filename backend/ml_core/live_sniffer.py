@@ -39,6 +39,7 @@ from app.services.live_traffic_store import append_live_log, classify_attack_typ
 MODEL_PATH = Path(__file__).resolve().parent / "anomaly_model.pkl"
 FLOW_IDLE_TTL_SECONDS = 90
 IGNORED_CAPTURE_PORTS = {3000, 8000}
+SIMULATED_TRAFFIC_FALLBACK = os.getenv("ENABLE_SIMULATED_TRAFFIC_FALLBACK", "1") != "0"
 IGNORED_IP_NETWORKS = (
     ipaddress.ip_network("127.0.0.0/8"),
     ipaddress.ip_network("172.18.0.0/16"),
@@ -550,6 +551,7 @@ def _sniffer_worker(controller: LiveSnifferController) -> None:
         clear_live_traffic_store()
 
     current_interfaces: list[str] = []
+    last_demo_batch_at = 0.0
 
     while not controller.stop_event.is_set():
         resolved_interfaces = _resolve_active_interface_set(controller.preferred_iface)
@@ -562,9 +564,15 @@ def _sniffer_worker(controller: LiveSnifferController) -> None:
             else:
                 print("[SNIFFER] No active physical interface found. Demo fallback active.", flush=True)
 
-        if scorer.get_real_idle_seconds() >= 3.0:
+        idle_seconds = scorer.get_real_idle_seconds()
+        should_generate_demo = SIMULATED_TRAFFIC_FALLBACK and (
+            not current_interfaces or idle_seconds >= 3.0
+        )
+
+        if should_generate_demo and (time.time() - last_demo_batch_at) >= 1.0:
             for packet in scorer.generate_demo_packets():
                 scorer.update_from_packet(packet, capture_source="demo")
+            last_demo_batch_at = time.time()
             time.sleep(1.0)
             continue
 

@@ -14,6 +14,9 @@ RUN npm run build
 
 FROM nginx:1.27-alpine
 
+ENV PORT=80
+
+COPY frontend/nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=build /app/frontend/dist /usr/share/nginx/html
 
 EXPOSE 80
